@@ -1,59 +1,109 @@
 <template>
   <div class="page-container">
-    <!-- ===== 统计概览 ===== -->
+    <!-- ===== 统计卡片 ===== -->
     <el-row :gutter="16" class="stats-row">
-      <el-col :span="12">
-        <div class="stat-card stat-total">
+      <el-col :span="6">
+        <div class="stat-card stat-total" @click="toggleFilter('')">
           <div class="stat-number">{{ stats.total }}</div>
           <div class="stat-label">总人数</div>
         </div>
       </el-col>
-      <el-col :span="12">
-        <div class="stat-card stat-warning">
-          <div class="stat-number" style="color: #f56c6c">{{ stats.expiringSoon }}</div>
-          <div class="stat-label">即将过期</div>
+      <el-col :span="6">
+        <div
+          class="stat-card stat-normal"
+          :class="{ active: filterStatus === 'valid' }"
+          @click="toggleFilter('valid')"
+        >
+          <div class="stat-number">{{ stats.valid }}</div>
+          <div class="stat-label">正常</div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div
+          class="stat-card stat-warning"
+          :class="{ active: filterStatus === 'expiring_soon' }"
+          @click="toggleFilter('expiring_soon')"
+        >
+          <div class="stat-number">{{ stats.expiringSoon }}</div>
+          <div class="stat-label">临期 ≤30天</div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div
+          class="stat-card stat-danger"
+          :class="{ active: filterStatus === 'expired' }"
+          @click="toggleFilter('expired')"
+        >
+          <div class="stat-number">{{ stats.expired }}</div>
+          <div class="stat-label">已过期</div>
         </div>
       </el-col>
     </el-row>
 
     <!-- 搜索栏 -->
     <div class="toolbar">
-      <h2>员工健康证管理</h2>
+      <h2>
+        员工健康证管理
+        <el-tag v-if="filterStatus" size="small" closable @close="filterStatus = ''" style="margin-left:10px">
+          已筛选：{{ statusLabel(filterStatus) }}
+        </el-tag>
+      </h2>
       <div class="toolbar-right">
+        <template v-if="selectedRows.length > 0">
+          <span style="color:#606266;margin-right:8px">已选 {{ selectedRows.length }} 项</span>
+          <el-button type="warning" @click="handleBatchExport">批量导出</el-button>
+          <el-popconfirm title="确定要删除选中的健康证吗？" @confirm="handleBatchDelete">
+            <template #reference>
+              <el-button type="danger">批量删除</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
         <el-input
           v-model="keyword"
-          placeholder="搜索员工姓名..."
+          placeholder="搜索姓名/部门..."
           clearable
           style="width: 220px; margin-right: 10px"
           @input="currentPage = 1; fetchList()"
         />
+        <el-button type="success" @click="handleExport">导出 Excel</el-button>
         <el-button type="primary" @click="openAddDialog">添加健康证</el-button>
       </div>
     </div>
 
     <!-- 列表表格 -->
     <el-card>
-      <el-table :data="pagedList" border stripe v-loading="loading">
+      <el-table :data="pagedList" border stripe v-loading="loading" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="40" />
         <el-table-column prop="employee_name" label="员工姓名" min-width="120" />
-        <el-table-column prop="id_number" label="身份证号" width="200">
+        <el-table-column prop="department" label="部门" width="120">
           <template #default="{ row }">
-            {{ row.id_number || '-' }}
+            {{ row.department || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="issue_date" label="发证日期" width="130" />
         <el-table-column prop="expiry_date" label="到期日期" width="130" />
         <!-- 状态列 -->
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="130">
           <template #default="{ row }">
-            <el-tag v-if="row.status === 'valid'" type="success">正常</el-tag>
-            <el-tag v-else-if="row.status === 'expiring_soon'" type="warning">临期</el-tag>
-            <el-tag v-else type="danger">已过期</el-tag>
+            <el-tag v-if="row.status === 'valid'" type="success">正常 · 剩{{ getDaysLeft(row.expiry_date) }}天</el-tag>
+            <el-tag v-else-if="row.status === 'expiring_soon'" type="warning">临期 · 剩{{ getDaysLeft(row.expiry_date) }}天</el-tag>
+            <el-tag v-else type="danger">已过期 · 超{{ -getDaysLeft(row.expiry_date) }}天</el-tag>
           </template>
         </el-table-column>
         <!-- 附件列 -->
-        <el-table-column label="附件" width="80">
+        <el-table-column label="附件" width="100">
           <template #default="{ row }">
-            <el-button v-if="row.file_path" type="primary" link @click="previewImage(row.file_path)">查看</el-button>
+            <div v-if="getFilePaths(row).length > 0" class="file-list">
+              <el-button
+                v-for="(fp, idx) in getFilePaths(row)"
+                :key="idx"
+                type="primary"
+                link
+                size="small"
+                @click="handlePreview(fp)"
+              >
+                {{ getFileIcon(fp) }} 文件{{ idx + 1 }}
+              </el-button>
+            </div>
             <span v-else style="color:#c0c4cc">无</span>
           </template>
         </el-table-column>
@@ -70,14 +120,14 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && list.length === 0" description="暂无健康证记录" />
-      <div v-if="list.length > 10" class="pagination-wrap">
+      <el-empty v-if="!loading && filteredList.length === 0" description="暂无健康证记录" />
+      <div v-if="filteredList.length > 10" class="pagination-wrap">
         <el-pagination
           v-model:current-page="currentPage"
           :page-size="pageSize"
           :pager-count="5"
           layout="prev, pager, next, total"
-          :total="list.length"
+          :total="filteredList.length"
           background
         />
       </div>
@@ -89,17 +139,8 @@
         <el-form-item label="员工姓名">
           <el-input v-model="form.employee_name" placeholder="请输入员工姓名" />
         </el-form-item>
-        <el-form-item label="身份证号">
-          <el-input v-model="form.id_number" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="发证日期">
-          <el-date-picker
-            v-model="form.issue_date"
-            type="date"
-            placeholder="选择发证日期"
-            value-format="YYYY-MM-DD"
-            style="width:100%"
-          />
+        <el-form-item label="部门">
+          <el-input v-model="form.department" placeholder="请输入部门" />
         </el-form-item>
         <el-form-item label="到期日期">
           <el-date-picker
@@ -110,19 +151,22 @@
             style="width:100%"
           />
         </el-form-item>
-        <el-form-item label="健康证图片">
+        <el-form-item label="上传附件">
           <el-upload
             ref="uploadRef"
+            drag
             :auto-upload="false"
-            :limit="1"
+            :limit="5"
             :on-change="handleFileChange"
             :on-remove="handleFileRemove"
-            accept="image/*"
-            list-type="picture"
+            :on-exceed="handleExceed"
+            accept="image/jpeg,image/png,image/gif,.pdf,.doc,.docx"
+            list-type="text"
+            multiple
           >
-            <el-button type="primary">选择图片</el-button>
+            <div class="el-upload__text">拖拽文件到此处 或 <em>点击选择</em></div>
             <template #tip>
-              <div class="upload-tip">支持 jpg/png 格式</div>
+              <div class="upload-tip">支持 jpg/png/gif/pdf/doc/docx，单个 ≤ 10MB，最多5个</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -134,9 +178,14 @@
       </template>
     </el-dialog>
 
-    <!-- 图片预览弹窗 -->
-    <el-dialog v-model="previewVisible" title="证照预览" width="600px">
-      <img :src="previewUrl" style="width:100%" alt="健康证图片" />
+    <!-- 附件预览弹窗 -->
+    <el-dialog v-model="previewVisible" title="附件预览" width="700px">
+      <img v-if="previewType === 'image'" :src="previewUrl" style="width:100%" alt="附件图片" />
+      <iframe v-else-if="previewType === 'pdf'" :src="previewUrl" style="width:100%;height:70vh" frameborder="0" />
+      <div v-else>
+        <p>此文件类型不支持在线预览</p>
+        <el-button type="primary" @click="downloadFile(previewUrl)">下载查看</el-button>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -146,7 +195,6 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '../utils/request'
-import { compressImage } from '../utils/compress'
 import axios from 'axios'
 
 // 当前用户
@@ -160,18 +208,42 @@ const loading = ref(false)
 const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
+const filterStatus = ref('')
+
+const toggleFilter = (status) => {
+  filterStatus.value = filterStatus.value === status ? '' : status
+  currentPage.value = 1
+}
+
+const statusLabel = (status) => {
+  return { valid: '正常', expiring_soon: '临期 ≤30天', expired: '已过期' }[status] || status
+}
+
+const getDaysLeft = (expiryDate) => {
+  const diff = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24))
+  return diff
+}
 
 // 统计数据
 const stats = computed(() => {
-  const total = list.value.length
-  const expiringSoon = list.value.filter(r => r.status === 'expiring_soon').length
-  return { total, expiringSoon }
+  const filtered = list.value.filter(r => filterStatus.value ? r.status === filterStatus.value : true)
+  return {
+    total: filtered.length,
+    valid: filtered.filter(r => r.status === 'valid').length,
+    expiringSoon: filtered.filter(r => r.status === 'expiring_soon').length,
+    expired: filtered.filter(r => r.status === 'expired').length
+  }
+})
+
+const filteredList = computed(() => {
+  if (!filterStatus.value) return list.value
+  return list.value.filter(r => r.status === filterStatus.value)
 })
 
 // 分页后的列表
 const pagedList = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return list.value.slice(start, start + pageSize.value)
+  return filteredList.value.slice(start, start + pageSize.value)
 })
 
 // 获取列表
@@ -201,17 +273,18 @@ const dialogVisible = ref(false)
 const dialogMode = ref('add')  // 'add' | 'edit'
 const editingId = ref(null)
 const uploadRef = ref(null)
-const selectedFile = ref(null)
+const selectedFiles = ref([])
 const submitting = ref(false)
 
 const dialogTitle = computed(() => dialogMode.value === 'add' ? '添加健康证' : '编辑健康证')
 
 const form = reactive({
   employee_name: '',
-  id_number: '',
-  issue_date: '',
+  department: '',
   expiry_date: ''
 })
+
+const selectedRows = ref([])
 
 // 打开新增弹窗
 const openAddDialog = () => {
@@ -226,10 +299,9 @@ const openEditDialog = (row) => {
   dialogMode.value = 'edit'
   editingId.value = row.id
   form.employee_name = row.employee_name
-  form.id_number = row.id_number || ''
-  form.issue_date = row.issue_date
+  form.department = row.department || ''
   form.expiry_date = row.expiry_date
-  selectedFile.value = null
+  selectedFiles.value = []
   if (uploadRef.value) uploadRef.value.clearFiles()
   dialogVisible.value = true
 }
@@ -237,25 +309,29 @@ const openEditDialog = (row) => {
 // 重置表单
 const resetForm = () => {
   form.employee_name = ''
-  form.id_number = ''
-  form.issue_date = ''
+  form.department = ''
   form.expiry_date = ''
-  selectedFile.value = null
+  selectedFiles.value = []
   if (uploadRef.value) uploadRef.value.clearFiles()
 }
 
-const handleFileChange = async (file) => {
-  selectedFile.value = await compressImage(file.raw)
+const handleFileChange = (file) => {
+  selectedFiles.value.push(file.raw)
 }
 
-const handleFileRemove = () => {
-  selectedFile.value = null
+const handleFileRemove = (file) => {
+  const idx = selectedFiles.value.indexOf(file.raw)
+  if (idx > -1) selectedFiles.value.splice(idx, 1)
+}
+
+const handleExceed = () => {
+  ElMessage.warning('最多上传5个文件，请先移除已有文件')
 }
 
 // 提交（新增或编辑）
 const handleSubmit = async () => {
-  if (!form.employee_name || !form.issue_date || !form.expiry_date) {
-    ElMessage.warning('请填写员工姓名、发证日期和到期日期')
+  if (!form.employee_name || !form.expiry_date) {
+    ElMessage.warning('请填写员工姓名和到期日期')
     return
   }
 
@@ -264,12 +340,11 @@ const handleSubmit = async () => {
     const fd = new FormData()
     fd.append('user_id', userId)
     fd.append('employee_name', form.employee_name)
-    fd.append('id_number', form.id_number || '')
-    fd.append('issue_date', form.issue_date)
+    fd.append('department', form.department || '')
     fd.append('expiry_date', form.expiry_date)
-    if (selectedFile.value) {
-      fd.append('file', selectedFile.value)
-    }
+    selectedFiles.value.forEach(file => {
+      fd.append('files', file)
+    })
 
     if (dialogMode.value === 'add') {
       await axios.post('/api/health-certs', fd)
@@ -299,13 +374,70 @@ const handleDelete = async (id) => {
   }
 }
 
-// ===== 图片预览 =====
+// ===== 批量操作 =====
+const onSelectionChange = (rows) => {
+  selectedRows.value = rows
+}
+
+const handleExport = () => {
+  window.open(`/api/health-certs/export?user_id=${userId}`, '_blank')
+}
+
+const handleBatchExport = () => {
+  const ids = selectedRows.value.map(r => r.id).join(',')
+  window.open(`/api/health-certs/export?user_id=${userId}&ids=${ids}`, '_blank')
+}
+
+const handleBatchDelete = async () => {
+  const ids = selectedRows.value.map(r => r.id)
+  try {
+    await request.post('/health-certs/batch-delete', { user_id: userId, ids })
+    ElMessage.success('批量删除成功')
+    selectedRows.value = []
+    fetchList()
+  } catch {
+    ElMessage.error('批量删除失败')
+  }
+}
+
+// ===== 附件预览 =====
 const previewVisible = ref(false)
 const previewUrl = ref('')
+const previewType = ref('')
 
-const previewImage = (filePath) => {
-  previewUrl.value = filePath  // 通过 Vite 代理访问 /uploads
-  previewVisible.value = true
+const getFilePaths = (row) => {
+  if (row.file_path && (!row.file_paths || row.file_paths === '[]')) return [row.file_path]
+  if (!row.file_paths || row.file_paths === '[]') return []
+  try { return JSON.parse(row.file_paths) } catch { return [] }
+}
+
+const getFileIcon = (fp) => {
+  const ext = fp.split('.').pop().toLowerCase()
+  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼'
+  if (ext === 'pdf') return '📄'
+  if (['doc', 'docx'].includes(ext)) return '📝'
+  return '📎'
+}
+
+const handlePreview = (filePath) => {
+  previewUrl.value = filePath
+  const ext = filePath.split('.').pop().toLowerCase()
+  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+    previewType.value = 'image'
+  } else if (ext === 'pdf') {
+    previewType.value = 'pdf'
+  } else {
+    previewType.value = 'other'
+  }
+  if (previewType.value === 'image' || previewType.value === 'pdf') {
+    previewVisible.value = true
+  } else {
+    downloadFile(filePath)
+  }
+}
+
+const downloadFile = (filePath) => {
+  window.open(filePath, '_blank')
 }
 </script>
 
@@ -318,13 +450,29 @@ const previewImage = (filePath) => {
   text-align: center;
   padding: 20px 0;
   border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
   color: #fff;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.stat-card.active {
+  transform: scale(1.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 .stat-total {
   background: linear-gradient(135deg, #409eff, #66b1ff);
 }
+.stat-normal {
+  background: linear-gradient(135deg, #67c23a, #85ce61);
+}
 .stat-warning {
   background: linear-gradient(135deg, #e6a23c, #ebb563);
+}
+.stat-danger {
+  background: linear-gradient(135deg, #f56c6c, #f89898);
 }
 .stat-number {
   font-size: 36px;

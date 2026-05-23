@@ -50,6 +50,37 @@
           <span class="system-name">AI 食安</span>
         </div>
         <div class="header-right">
+          <!-- 通知铃铛 -->
+          <el-popover
+            placement="bottom-end"
+            :width="340"
+            trigger="click"
+            @show="fetchNotifications"
+          >
+            <template #reference>
+              <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99" class="notify-badge">
+                <el-icon :size="22" class="bell-icon"><Bell /></el-icon>
+              </el-badge>
+            </template>
+            <div class="notify-panel">
+              <div class="notify-header">
+                <span>通知</span>
+                <el-button v-if="unreadCount > 0" type="primary" link size="small" @click="readAll">全部已读</el-button>
+              </div>
+              <div v-if="notifications.length === 0" class="notify-empty">暂无通知</div>
+              <div
+                v-for="item in notifications"
+                :key="item.id"
+                class="notify-item"
+                :class="{ unread: item.is_read === 0 }"
+                @click="readOne(item)"
+              >
+                <div class="notify-title">{{ item.title }}</div>
+                <div class="notify-content">{{ item.content }}</div>
+                <div class="notify-time">{{ item.created_at }}</div>
+              </div>
+            </div>
+          </el-popover>
           <el-dropdown @command="handleCommand">
             <span class="user-info">
               <el-icon><UserFilled /></el-icon>
@@ -74,8 +105,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import request from '../utils/request'
 import {
   HomeFilled,
   Document,
@@ -83,7 +115,8 @@ import {
   PriceTag,
   Reading,
   UserFilled,
-  ArrowDown
+  ArrowDown,
+  Bell
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -96,16 +129,55 @@ const currentRoute = computed(() => route.path)
 const userStr = localStorage.getItem('user')
 const user = userStr ? JSON.parse(userStr) : {}
 const username = user.username || '未知用户'
+const userId = user.id
 
 // 下拉菜单命令处理
 const handleCommand = (command) => {
   if (command === 'logout') {
-    // 清除登录信息
     localStorage.removeItem('user')
-    // 跳转回登录页
     router.push('/login')
   }
 }
+
+// ===== 通知 =====
+const notifications = ref([])
+const unreadCount = ref(0)
+let pollTimer = null
+
+const fetchNotifications = async () => {
+  try {
+    const res = await request.get('/notifications', { params: { user_id: userId } })
+    notifications.value = res.list
+    unreadCount.value = res.unreadCount
+  } catch {}
+}
+
+const readOne = async (item) => {
+  if (item.is_read === 0) {
+    try {
+      await request.put(`/notifications/${item.id}/read`)
+      item.is_read = 1
+      unreadCount.value = Math.max(0, unreadCount.value - 1)
+    } catch {}
+  }
+}
+
+const readAll = async () => {
+  try {
+    await request.put('/notifications/read-all', { user_id: userId })
+    notifications.value.forEach(n => { n.is_read = 1 })
+    unreadCount.value = 0
+  } catch {}
+}
+
+onMounted(() => {
+  fetchNotifications()
+  pollTimer = setInterval(fetchNotifications, 60000)  // 每分钟刷新
+})
+
+onUnmounted(() => {
+  clearInterval(pollTimer)
+})
 </script>
 
 <style scoped>
@@ -157,6 +229,66 @@ const handleCommand = (command) => {
 }
 .user-info:hover {
   color: #409eff;
+}
+
+/* ===== 通知 ===== */
+.bell-icon {
+  cursor: pointer;
+  color: #606266;
+  margin-right: 20px;
+}
+.bell-icon:hover {
+  color: #409eff;
+}
+.notify-badge {
+  display: flex;
+  align-items: center;
+}
+.notify-panel {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.notify-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #ebeef5;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #303133;
+}
+.notify-empty {
+  text-align: center;
+  color: #c0c4cc;
+  padding: 30px 0;
+  font-size: 14px;
+}
+.notify-item {
+  padding: 10px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.notify-item:hover {
+  background: #f5f7fa;
+}
+.notify-item.unread {
+  background: #ecf5ff;
+}
+.notify-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+.notify-content {
+  font-size: 12px;
+  color: #909399;
+  margin: 4px 0;
+}
+.notify-time {
+  font-size: 11px;
+  color: #c0c4cc;
 }
 
 /* ===== 内容区 ===== */

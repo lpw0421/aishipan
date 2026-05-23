@@ -94,16 +94,18 @@ const storage = multer.diskStorage({
   }
 })
 
-// 允许的 MIME 类型：图片 + PDF + Word
+// 允许的 MIME 类型 + 扩展名双重校验（JPEG 不同系统可能报 image/jpg）
 const ALLOWED_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif',
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]
+const ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx']
 
 function fileFilter(req, file, cb) {
-  if (ALLOWED_TYPES.includes(file.mimetype)) {
+  const ext = file.originalname.split('.').pop().toLowerCase()
+  if (ALLOWED_TYPES.includes(file.mimetype) || ALLOWED_EXTS.includes(ext)) {
     cb(null, true)
   } else {
     cb(new Error('不支持的文件格式，仅允许 jpg/png/gif/pdf/doc/docx'))
@@ -188,11 +190,26 @@ function checkAndNotify() {
   }
 
   console.log(`⚠️  发现 ${rows.length} 个临期证照:`)
+  const insertNotify = db.prepare(
+    'INSERT INTO notifications (user_id, title, content, type, source_type) VALUES (?, ?, ?, ?, ?)'
+  )
   rows.forEach((row, i) => {
     const diff = Math.ceil((new Date(row.expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
     const typeLabel = row.type === 'certificate' ? '资质' : '健康证'
     const companyLabel = row.company_name ? ` [${row.company_name}]` : ''
     console.log(`  ${i + 1}. [${row.username}] ${row.title}${companyLabel}（${typeLabel}）- ${row.expiry_date}（剩余 ${diff} 天）`)
+    // 写入通知表（同一个证照同一天不重复通知）
+    const title = row.company_name ? `${row.company_name} - ${row.title}` : row.title
+    const content = `${typeLabel}「${row.title}」将于 ${row.expiry_date} 到期，剩余 ${diff} 天`
+    const userId = db.prepare('SELECT id FROM users WHERE username = ?').get(row.username)?.id
+    if (userId) {
+      const exists = db.prepare(
+        "SELECT id FROM notifications WHERE user_id = ? AND source_type = ? AND content = ? AND date(created_at) = date('now')"
+      ).get(userId, row.type, content)
+      if (!exists) {
+        insertNotify.run(userId, title, content, 'warning', row.type)
+      }
+    }
   })
 
   // 如果有 Webhook URL，则发送通知
@@ -529,7 +546,7 @@ app.get('/api/dashboard/stats', (req, res) => {
 
 // ===== 健康证管理接口 =====
 
-// 获取健康证列表（支持按姓名搜索）
+// 获取健康证列表（支持按姓名/部门搜索）
 app.get('/api/health-certs', (req, res) => {
   const userId = req.query.user_id
   const keyword = req.query.keyword || ''
@@ -541,10 +558,10 @@ app.get('/api/health-certs', (req, res) => {
   let sql = 'SELECT * FROM health_certs WHERE user_id = ?'
   const params = [userId]
 
-  // 如果有搜索关键词，模糊匹配员工姓名
   if (keyword) {
-    sql += ' AND employee_name LIKE ?'
-    params.push('%' + keyword + '%')
+    sql += ' AND (employee_name LIKE ? OR department LIKE ?)'
+    const kw = '%' + keyword + '%'
+    params.push(kw, kw)
   }
 
   sql += ' ORDER BY created_at DESC'
@@ -560,26 +577,29 @@ app.get('/api/health-certs', (req, res) => {
   res.json({ list })
 })
 
-// 新增健康证（含文件上传）
-app.post('/api/health-certs', upload.single('file'), sanitizeUploadBody, (req, res) => {
-  const { user_id, employee_name, id_number, issue_date, expiry_date } = req.body
-  if (!user_id || !employee_name || !issue_date || !expiry_date) {
-    return res.status(400).json({ message: '请填写完整信息' })
+// 新增健康证（支持多文件上传）
+app.post('/api/health-certs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
+  const { user_id, employee_name, department, expiry_date } = req.body
+  if (!user_id || !employee_name || !expiry_date) {
+    return res.status(400).json({ message: '请填写员工姓名和到期日期' })
   }
 
-  const filePath = req.file ? '/uploads/' + req.file.filename : ''
+  const paths = (req.files || []).map(f => '/uploads/' + f.filename)
+  const filePaths = JSON.stringify(paths)
+  // 向后兼容：单文件路径也存 file_path
+  const singlePath = paths.length > 0 ? paths[0] : ''
 
   const result = db.prepare(
-    'INSERT INTO health_certs (user_id, employee_name, id_number, issue_date, expiry_date, file_path) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(user_id, employee_name, id_number || '', issue_date, expiry_date, filePath)
+    'INSERT INTO health_certs (user_id, employee_name, id_number, issue_date, department, expiry_date, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(user_id, employee_name, '', '', department || '', expiry_date, singlePath)
 
   res.json({ message: '健康证添加成功', id: result.lastInsertRowid })
 })
 
 // 编辑健康证
-app.put('/api/health-certs/:id', upload.single('file'), sanitizeUploadBody, (req, res) => {
+app.put('/api/health-certs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, employee_name, id_number, issue_date, expiry_date } = req.body
+  const { user_id, employee_name, department, expiry_date } = req.body
 
   // 校验权限
   const existing = db.prepare('SELECT * FROM health_certs WHERE id = ? AND user_id = ?').get(id, user_id)
@@ -587,12 +607,15 @@ app.put('/api/health-certs/:id', upload.single('file'), sanitizeUploadBody, (req
     return res.status(404).json({ message: '记录不存在或无权编辑' })
   }
 
-  // 如果上传了新文件则用新路径，否则保留原路径
-  const filePath = req.file ? '/uploads/' + req.file.filename : existing.file_path
+  let filePath = existing.file_path
+  if (req.files && req.files.length > 0) {
+    const paths = req.files.map(f => '/uploads/' + f.filename)
+    filePath = paths[0]  // 取第一个作为主文件路径
+  }
 
   db.prepare(
-    'UPDATE health_certs SET employee_name=?, id_number=?, issue_date=?, expiry_date=?, file_path=? WHERE id=?'
-  ).run(employee_name, id_number || '', issue_date, expiry_date, filePath, id)
+    'UPDATE health_certs SET employee_name=?, department=?, expiry_date=?, file_path=? WHERE id=?'
+  ).run(employee_name || existing.employee_name, department || '', expiry_date || existing.expiry_date, filePath, id)
 
   res.json({ message: '健康证更新成功' })
 })
@@ -607,8 +630,167 @@ app.delete('/api/health-certs/:id', (req, res) => {
     return res.status(404).json({ message: '记录不存在或无权删除' })
   }
 
+  // 物理删除附件
+  const fs = require('fs')
+  if (cert.file_path) {
+    const filePath = path.join(__dirname, cert.file_path)
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+  }
+
   db.prepare('DELETE FROM health_certs WHERE id = ?').run(id)
   res.json({ message: '健康证已删除' })
+})
+
+// 批量删除健康证
+app.post('/api/health-certs/batch-delete', (req, res) => {
+  const { user_id, ids } = req.body
+  const fs = require('fs')
+
+  if (!user_id || !Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ message: '请选择要删除的健康证' })
+  }
+
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = db.prepare(
+    `SELECT * FROM health_certs WHERE id IN (${placeholders}) AND user_id = ?`
+  ).all(...ids, user_id)
+
+  if (rows.length === 0) {
+    return res.status(404).json({ message: '未找到可删除的记录' })
+  }
+
+  rows.forEach(cert => {
+    if (cert.file_path) {
+      const filePath = path.join(__dirname, cert.file_path)
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath) } catch {}
+    }
+  })
+
+  db.prepare(`DELETE FROM health_certs WHERE id IN (${placeholders}) AND user_id = ?`).run(...ids, user_id)
+  res.json({ message: `已删除 ${rows.length} 条健康证记录`, count: rows.length })
+})
+
+// 导出健康证为 Excel
+app.get('/api/health-certs/export', (req, res) => {
+  const userId = req.query.user_id
+  const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
+  if (!userId) {
+    return res.status(400).json({ message: '缺少用户标识' })
+  }
+
+  let sql = 'SELECT * FROM health_certs WHERE user_id = ?'
+  const params = [userId]
+  if (ids.length > 0) {
+    sql += ` AND id IN (${ids.map(() => '?').join(',')})`
+    params.push(...ids)
+  }
+  sql += ' ORDER BY created_at DESC'
+  const rows = db.prepare(sql).all(...params)
+
+  const data = rows.map(row => ({
+    '员工姓名': row.employee_name,
+    '部门': row.department || '',
+    '到期日期': row.expiry_date,
+    '状态': getStatus(row.expiry_date) === 'expired' ? '已过期' :
+            getStatus(row.expiry_date) === 'expiring_soon' ? '临期' : '正常',
+    '创建时间': row.created_at
+  }))
+
+  const ws = XLSX.utils.json_to_sheet(data)
+  ws['!cols'] = [
+    { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }
+  ]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '健康证列表')
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('健康证列表.xlsx'))
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.send(buf)
+})
+
+// ===== 通知接口 =====
+
+// 获取通知列表（最近50条）和未读数
+app.get('/api/notifications', (req, res) => {
+  const userId = req.query.user_id
+  if (!userId) {
+    return res.status(400).json({ message: '缺少用户标识' })
+  }
+  const list = db.prepare(
+    'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50'
+  ).all(userId)
+  const unreadCount = db.prepare(
+    'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = ? AND is_read = 0'
+  ).get(userId).cnt
+  res.json({ list, unreadCount })
+})
+
+// 标记单条已读
+app.put('/api/notifications/:id/read', (req, res) => {
+  const { id } = req.params
+  db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(id)
+  res.json({ message: '已标记为已读' })
+})
+
+// 全部标记已读
+app.put('/api/notifications/read-all', (req, res) => {
+  const { user_id } = req.body
+  db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(user_id)
+  res.json({ message: '全部已读' })
+})
+
+// ===== 法规库接口 =====
+
+// 获取法规列表（支持按分类和关键词搜索）
+app.get('/api/regulations', (req, res) => {
+  const category = req.query.category || ''
+  const keyword = req.query.keyword || ''
+
+  let sql = 'SELECT * FROM regulations WHERE 1=1'
+  const params = []
+
+  if (category) {
+    sql += ' AND category = ?'
+    params.push(category)
+  }
+
+  if (keyword) {
+    sql += ' AND (title LIKE ? OR full_title LIKE ? OR content LIKE ? OR number LIKE ?)'
+    const kw = '%' + keyword + '%'
+    params.push(kw, kw, kw, kw)
+  }
+
+  sql += ' ORDER BY category, effective_date DESC'
+
+  const rows = db.prepare(sql).all(...params)
+  res.json({ list: rows })
+})
+
+// 新增法规（支持附件上传，同时推送通知给所有用户）
+app.post('/api/regulations', upload.single('file'), (req, res) => {
+  const { title, full_title, category, number, effective_date, repeal_date, content, url } = req.body
+  if (!title || !full_title || !category) {
+    return res.status(400).json({ message: '请填写法规名称和分类' })
+  }
+
+  const filePath = req.file ? '/uploads/' + req.file.filename : ''
+
+  const result = db.prepare(
+    'INSERT INTO regulations (title, full_title, category, number, effective_date, repeal_date, content, url, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(title, full_title, category, number || '', effective_date || '', repeal_date || '', content || '', url || '', filePath)
+
+  // 推送通知给所有用户
+  const users = db.prepare('SELECT id FROM users').all()
+  const notifyStmt = db.prepare(
+    'INSERT INTO notifications (user_id, title, content, type, source_type, source_id) VALUES (?, ?, ?, ?, ?, ?)'
+  )
+  const categoryLabel = { law: '法律', standard: '国家标准', industry: '行业规范' }[category] || '法规'
+  users.forEach(u => {
+    notifyStmt.run(u.id, `新法规：${title}`, `${categoryLabel}「${full_title}」已于法规库更新`, 'info', 'regulation', result.lastInsertRowid)
+  })
+
+  res.json({ message: '法规添加成功', id: result.lastInsertRowid })
 })
 
 // ===== 审核规则接口 =====
