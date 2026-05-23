@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./server
+    container_name: ai-shipan-api
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - ./server/.env.production
+    volumes:
+      # 持久化数据库和上传文件
+      - ./server/data.db:/app/data.db
+      - ./server/uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: ai-shipan-web
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
