@@ -1,0 +1,1 @@
+import{i as e}from"./index-BTbHMoB0.js";import{n as t}from"./_plugin-vue_export-helper-DbIJDYtw.js";var n=t.create({baseURL:`/api`,timeout:1e4});n.interceptors.response.use(e=>e.data,t=>{let n=t.response?.data?.message||`网络请求失败，请稍后重试`;return e.error(n),Promise.reject(t)});export{n as t};
