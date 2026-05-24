@@ -15,14 +15,6 @@
     </div>
 
     <el-card>
-      <!-- 分类 Tab -->
-      <el-tabs v-model="category" @tab-change="currentPage = 1">
-        <el-tab-pane :label="'全部 (' + list.length + ')'" name="" />
-        <el-tab-pane :label="'法律 (' + categoryCounts.law + ')'" name="law" />
-        <el-tab-pane :label="'国家标准 (' + categoryCounts.standard + ')'" name="standard" />
-        <el-tab-pane :label="'行业规范 (' + categoryCounts.industry + ')'" name="industry" />
-      </el-tabs>
-
       <!-- 法规列表 -->
       <el-table :data="pagedList" stripe v-loading="loading" highlight-current-row
         @row-click="showDetail" row-class-name="reg-row">
@@ -106,6 +98,7 @@
             <el-option label="法律" value="law" />
             <el-option label="国家标准" value="standard" />
             <el-option label="行业规范" value="industry" />
+            <el-option label="企业制度" value="company" />
           </el-select>
         </el-form-item>
         <el-form-item label="标准号">
@@ -148,35 +141,41 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Download, Link } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '../utils/request'
 import axios from 'axios'
 
+const route = useRoute()
+
 const list = ref([])
 const loading = ref(false)
-const category = ref('')
+const urlCategory = computed(() => {
+  if (route.path.includes('/regulations/industry')) return 'industry'
+  if (route.path.includes('/regulations/company')) return 'company'
+  return 'national'
+})
 const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 
-const categoryLabel = (cat) => ({ law: '法律', standard: '国家标准', industry: '行业规范' }[cat] || cat)
-const categoryType = (cat) => ({ law: 'primary', standard: 'warning', industry: '' }[cat] || 'info')
+const categoryLabel = (cat) => ({ law: '法律', standard: '国家标准', industry: '行业规范', company: '企业制度' }[cat] || cat)
+const categoryType = (cat) => ({ law: 'primary', standard: 'warning', industry: '', company: 'success' }[cat] || 'info')
 
 const isUpcoming = (row) => {
   if (!row.effective_date) return false
   return new Date(row.effective_date) > new Date()
 }
 
-const categoryCounts = computed(() => ({
-  law: list.value.filter(r => r.category === 'law').length,
-  standard: list.value.filter(r => r.category === 'standard').length,
-  industry: list.value.filter(r => r.category === 'industry').length
-}))
-
 const filteredList = computed(() => {
   let result = list.value
+  if (urlCategory.value === 'national') {
+    result = result.filter(r => r.category === 'law' || r.category === 'standard')
+  } else {
+    result = result.filter(r => r.category === urlCategory.value)
+  }
   if (keyword.value) {
     const kw = keyword.value.toLowerCase()
     result = result.filter(r =>
@@ -194,9 +193,7 @@ const pagedList = computed(() => {
 const fetchList = async () => {
   loading.value = true
   try {
-    const params = {}
-    if (category.value) params.category = category.value
-    const res = await request.get('/regulations', { params })
+    const res = await request.get('/regulations')
     list.value = res.list
   } catch {} finally {
     loading.value = false
@@ -204,6 +201,11 @@ const fetchList = async () => {
 }
 
 onMounted(fetchList)
+
+watch(() => route.path, () => {
+  currentPage.value = 1
+  fetchList()
+})
 
 // 详情弹窗
 const dialogVisible = ref(false)

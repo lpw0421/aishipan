@@ -1,11 +1,5 @@
 <template>
   <div class="page-container">
-    <!-- ===== Tab 切换：自有资质 / 供应商资质 ===== -->
-    <el-tabs v-model="category" @tab-change="onTabChange" class="category-tabs">
-      <el-tab-pane label="自有资质" name="own" />
-      <el-tab-pane label="供应商资质" name="supplier" />
-    </el-tabs>
-
     <!-- ===== 统计卡片 ===== -->
     <el-row :gutter="16" class="stats-row">
       <el-col :span="8">
@@ -226,7 +220,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '../utils/request'
@@ -243,7 +237,7 @@ const submitting = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const filterStatus = ref('')
-const category = ref('own')
+const category = computed(() => route.path.includes('/credentials/supplier') ? 'supplier' : 'own')
 const keyword = ref('')
 const selectedRows = ref([])
 
@@ -318,12 +312,12 @@ onMounted(() => {
   if (route.query.action === 'add') openAddDialog()
 })
 
-const onTabChange = () => {
+watch(() => route.path, () => {
   filterStatus.value = ''
   keyword.value = ''
   currentPage.value = 1
   fetchList()
-}
+})
 
 // ===== 导出 Excel =====
 const handleExport = () => {
@@ -503,13 +497,6 @@ const downloadFile = (filePath) => {
 </script>
 
 <style scoped>
-.category-tabs {
-  margin-bottom: 4px;
-}
-.category-tabs :deep(.el-tabs__header) {
-  margin-bottom: 0;
-}
-
 .stats-row {
   margin-bottom: 16px;
 }

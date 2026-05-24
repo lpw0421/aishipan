@@ -40,20 +40,49 @@
       </el-col>
     </el-row>
 
+    <!-- 客诉统计卡片 -->
+    <el-row :gutter="16" class="stats-row" v-if="stats.complaints">
+      <el-col :span="6">
+        <div class="stat-card stat-purple">
+          <div class="stat-icon"><el-icon size="32"><ChatDotSquare /></el-icon></div>
+          <div class="stat-info">
+            <div class="stat-number">{{ stats.complaints.total }}</div>
+            <div class="stat-label">客诉总数</div>
+          </div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div class="stat-card stat-red" v-if="stats.complaints.urgent > 0">
+          <div class="stat-icon"><el-icon size="32"><WarningFilled /></el-icon></div>
+          <div class="stat-info">
+            <div class="stat-number" style="color:#fff">{{ stats.complaints.urgent }}</div>
+            <div class="stat-label">紧急客诉待处理</div>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
     <!-- ===== 快捷入口 ===== -->
     <el-row :gutter="16" class="actions-row">
-      <el-col :span="12">
+      <el-col :span="8">
         <el-card shadow="hover" class="action-card" @click="goAddCredential">
           <el-icon size="28" color="#409eff"><Plus /></el-icon>
           <span class="action-text">新增资质</span>
           <span class="action-desc">上传营业执照、许可证等资质证照</span>
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="8">
         <el-card shadow="hover" class="action-card" @click="goAddHealthCert">
           <el-icon size="28" color="#67c23a"><Plus /></el-icon>
           <span class="action-text">录入健康证</span>
           <span class="action-desc">录入员工健康证信息及到期提醒</span>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="hover" class="action-card" @click="goComplaint">
+          <el-icon size="28" color="#f56c6c"><Plus /></el-icon>
+          <span class="action-text">新增客诉</span>
+          <span class="action-desc">记录客户投诉并跟踪处理进度</span>
         </el-card>
       </el-col>
     </el-row>
@@ -78,7 +107,7 @@
         </el-table-column>
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.type === 'certificate' ? '' : 'success'" size="small">
+            <el-tag :type="row.type === 'certificate' ? 'primary' : 'success'" size="small">
               {{ row.type === 'certificate' ? '资质' : '健康证' }}
             </el-tag>
           </template>
@@ -99,7 +128,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Document, WarningFilled, UserFilled, Clock, Plus } from '@element-plus/icons-vue'
+import { Document, WarningFilled, UserFilled, Clock, Plus, ChatDotSquare } from '@element-plus/icons-vue'
 import request from '../utils/request'
 
 const router = useRouter()
@@ -113,7 +142,8 @@ const userId = user.id
 // 统计数据
 const stats = reactive({
   certificates: { total: 0, valid: 0, expiring_soon: 0, expired: 0 },
-  healthCerts: { total: 0, valid: 0, expiring_soon: 0, expired: 0 }
+  healthCerts: { total: 0, valid: 0, expiring_soon: 0, expired: 0 },
+  complaints: null
 })
 
 // 预警列表
@@ -126,6 +156,7 @@ const fetchStats = async () => {
     const res = await request.get('/dashboard/stats', { params: { user_id: userId } })
     stats.certificates = res.certificates
     stats.healthCerts = res.healthCerts
+    stats.complaints = res.complaints
     warnings.value = res.warnings
   } catch {
     // 错误在拦截器处理
@@ -143,6 +174,10 @@ const goAddCredential = () => {
 
 const goAddHealthCert = () => {
   router.push('/health-certs?action=add')
+}
+
+const goComplaint = () => {
+  router.push('/complaint/list')
 }
 
 // 点击预警项：跳转到对应详情页
@@ -189,6 +224,7 @@ const goDetail = (item) => {
 .stat-red   { background: linear-gradient(135deg, #f56c6c, #f89898); }
 .stat-green { background: linear-gradient(135deg, #67c23a, #85ce61); }
 .stat-orange{ background: linear-gradient(135deg, #e6a23c, #ebb563); }
+.stat-purple{ background: linear-gradient(135deg, #a855f7, #c084fc); }
 
 /* ===== 快捷入口 ===== */
 .actions-row {
