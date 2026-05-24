@@ -70,6 +70,7 @@ async function aiChat(message) {
 // Express 路由处理
 module.exports = async function feishuWebhook(req, res) {
   const body = req.body
+  console.log('[feishu-bot] 收到请求:', body.type || body.header?.event_type || 'unknown', '| IP:', req.ip)
 
   // URL 验证
   if (body.type === 'url_verification') {
@@ -87,6 +88,7 @@ module.exports = async function feishuWebhook(req, res) {
 
       // 兼容两种 content 格式：JSON字符串 或 已解析对象
       let content
+      console.log('[feishu-bot] raw content type:', typeof msg.content, 'value:', JSON.stringify(msg.content).slice(0, 200))
       if (typeof msg.content === 'string') {
         content = JSON.parse(msg.content)
       } else {
