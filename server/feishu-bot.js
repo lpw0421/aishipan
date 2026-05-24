@@ -84,16 +84,27 @@ module.exports = async function feishuWebhook(req, res) {
       const event = body.event
       const msg = event.message
       if (msg.message_type !== 'text') return
-      const content = JSON.parse(msg.content)
+
+      // 兼容两种 content 格式：JSON字符串 或 已解析对象
+      let content
+      if (typeof msg.content === 'string') {
+        content = JSON.parse(msg.content)
+      } else {
+        content = msg.content
+      }
+
       const userText = content.text?.trim()
       if (!userText) return
 
+      // 兼容两种 sender 格式
+      const senderId = event.sender?.open_id || event.sender?.sender_id?.open_id
+
       const reply = await aiChat(userText)
-      const receiveId = msg.chat_type === 'p2p' ? event.sender.open_id : msg.chat_id
+      const receiveId = msg.chat_type === 'p2p' ? senderId : msg.chat_id
       const receiveType = msg.chat_type === 'p2p' ? 'open_id' : 'chat_id'
       await sendReply(receiveType, receiveId, reply, msg.message_id)
     } catch (e) {
-      console.error('飞书消息处理失败:', e.message)
+      console.error('飞书消息处理失败:', e.message, e.stack)
     }
     return
   }
