@@ -26,6 +26,9 @@ const isProduction = process.env.NODE_ENV === 'production'
 app.use(cors())
 app.use(express.json())
 
+// 飞书 Webhook 路由——必须放在 sanitize 中间件之前，否则 content 中的 JSON 会被破坏
+app.post('/api/feishu/webhook', feishuWebhook)
+
 // XSS 防护：对请求体中的字符串字段做 HTML 转义
 function sanitize(obj) {
   if (typeof obj === 'string') {
@@ -303,8 +306,7 @@ app.get('/api/health', (req, res) => {
   res.json({ message: 'AI 食安后端已启动' })
 })
 
-// 飞书机器人 webhook（接收消息 → AI 回复）
-app.post('/api/feishu/webhook', feishuWebhook)
+// 飞书机器人 webhook 已移至中间件之前（绕过 XSS sanitize）
 
 // ===== 注册接口 =====
 app.post('/api/auth/register', strictLimiter, (req, res) => {
