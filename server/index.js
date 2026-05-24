@@ -3798,7 +3798,7 @@ if (isProduction) {
   const clientDist = path.join(__dirname, '..', 'client', 'dist')
   app.use(express.static(clientDist))
   // Vue Router history 模式：非 API/非静态文件请求返回 index.html
-  app.get('*', (req, res) => {
+  app.get('/*', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
       res.sendFile(path.join(clientDist, 'index.html'))
     }
