@@ -27,14 +27,13 @@ async function getTenantToken() {
   throw new Error('飞书token获取失败: ' + JSON.stringify(data))
 }
 
-// 回复消息
-async function sendReply(receiveIdType, receiveId, content, msgId) {
+// 回复消息 — 飞书API: POST /im/v1/messages/{message_id}/reply
+async function sendReply(msgId, content) {
   const token = await getTenantToken()
-  return fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${receiveIdType}/reply`, {
+  return fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${msgId}/reply`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      receive_id: receiveId,
       msg_type: 'text',
       content: JSON.stringify({ text: content })
     })
@@ -70,7 +69,6 @@ async function aiChat(message) {
 // Express 路由处理
 module.exports = async function feishuWebhook(req, res) {
   const body = req.body
-  console.log('[feishu-bot] 收到请求:', body.type || body.header?.event_type || 'unknown', '| IP:', req.ip)
 
   // URL 验证
   if (body.type === 'url_verification') {
@@ -88,7 +86,6 @@ module.exports = async function feishuWebhook(req, res) {
 
       // 兼容两种 content 格式：JSON字符串 或 已解析对象
       let content
-      console.log('[feishu-bot] raw content type:', typeof msg.content, 'value:', JSON.stringify(msg.content).slice(0, 200))
       if (typeof msg.content === 'string') {
         content = JSON.parse(msg.content)
       } else {
@@ -98,15 +95,10 @@ module.exports = async function feishuWebhook(req, res) {
       const userText = content.text?.trim()
       if (!userText) return
 
-      // 兼容两种 sender 格式
-      const senderId = event.sender?.open_id || event.sender?.sender_id?.open_id
-
       const reply = await aiChat(userText)
-      const receiveId = msg.chat_type === 'p2p' ? senderId : msg.chat_id
-      const receiveType = msg.chat_type === 'p2p' ? 'open_id' : 'chat_id'
-      await sendReply(receiveType, receiveId, reply, msg.message_id)
+      await sendReply(msg.message_id, reply)
     } catch (e) {
-      console.error('飞书消息处理失败:', e.message, e.stack)
+      console.error('飞书消息处理失败:', e.message)
     }
     return
   }

@@ -154,7 +154,38 @@ function getStatus(expiryDate, isPermanent = false) {
 // ---------- 预警推送配置 ----------
 
 // 企业微信/钉钉 Webhook 地址（配置真实地址后启用）
-const WEBHOOK_URL = ''
+// 飞书预警推送配置
+const FEISHU_ALERT_OPEN_ID = process.env.FEISHU_ALERT_OPEN_ID || ''
+let feishuTokenCache = { token: '', expire: 0 }
+
+// 通过飞书机器人主动发送消息
+async function sendFeishuMessage(openId, content) {
+  if (!openId || !process.env.FEISHU_APP_ID || !process.env.FEISHU_APP_SECRET) return
+  try {
+    // 获取 token
+    if (Date.now() >= feishuTokenCache.expire) {
+      const tokenRes = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: process.env.FEISHU_APP_ID, app_secret: process.env.FEISHU_APP_SECRET })
+      })
+      const tokenData = await tokenRes.json()
+      feishuTokenCache = { token: tokenData.tenant_access_token, expire: Date.now() + (tokenData.expire - 300) * 1000 }
+    }
+    // 发送消息
+    await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${feishuTokenCache.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        receive_id: openId,
+        msg_type: 'text',
+        content: JSON.stringify({ text: content })
+      })
+    })
+  } catch (e) {
+    console.error('[飞书推送] 发送失败:', e.message)
+  }
+}
 
 // 检查临期证照并发送预警通知
 function checkAndNotify() {
@@ -284,16 +315,18 @@ function checkAndNotify() {
     }
   })
 
-  // 如果有 Webhook URL，则发送通知
-  if (WEBHOOK_URL) {
-    const message = rows.map(r =>
-      `【${r.username}】${r.title} 将于 ${r.expiry_date} 到期`
-    ).join('\n')
-
-    console.log('📤 已推送到 Webhook:', WEBHOOK_URL)
-    console.log('📋 推送内容:\n' + message)
+  // 飞书推送预警
+  if (FEISHU_ALERT_OPEN_ID) {
+    const alertLines = rows.slice(0, 10).map((r, i) => {
+      const diff = Math.ceil((new Date(r.expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
+      return `  ${i + 1}. ${r.title} — ${r.expiry_date}（剩余${diff}天）`
+    })
+    const more = rows.length > 10 ? `\n  ...还有${rows.length - 10}条` : ''
+    const msg = `⚠️ 证照临期预警\n\n共 ${rows.length} 个证照30天内到期：\n${alertLines.join('\n')}${more}\n\n请登录 aishipan.com 查看详情`
+    sendFeishuMessage(FEISHU_ALERT_OPEN_ID, msg)
+    console.log('📤 已推送飞书预警')
   } else {
-    console.log('💡 提示：配置 WEBHOOK_URL 后可自动推送到企业微信/钉钉')
+    console.log('💡 提示：配置 FEISHU_ALERT_OPEN_ID 后可自动推送预警到飞书')
   }
 
   console.log('===== [预警任务] 检查完毕 =====\n')
