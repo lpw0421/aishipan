@@ -16,6 +16,7 @@ const db = require('./db')
 const { recognize } = require('./utils/ocr')
 const { aiAudit, aiExportAudit, aiNutritionGen, aiIngredientsVerify, aiSupplierScore, aiComplaintClassify, aiComplaintReply, aiComplaintAnalysis } = require('./utils/ai')
 const { generateReport } = require('./utils/report')
+const feishuWebhook = require('./feishu-bot')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -301,6 +302,9 @@ function checkAndNotify() {
 app.get('/api/health', (req, res) => {
   res.json({ message: 'AI 食安后端已启动' })
 })
+
+// 飞书机器人 webhook（接收消息 → AI 回复）
+app.post('/api/feishu/webhook', feishuWebhook)
 
 // ===== 注册接口 =====
 app.post('/api/auth/register', strictLimiter, (req, res) => {
