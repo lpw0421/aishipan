@@ -3833,7 +3833,8 @@ const ALLOWED_COMMANDS = {
   cron: 'crontab -l 2>&1',
   'setup-cron': 'cd /opt/aishipan && chmod +x server/patrol.sh && bash server/setup-cron.sh 2>&1',
   restart: 'pm2 restart aishipan 2>&1',
-  uptime: 'uptime && df -h / && free -h 2>&1'
+  uptime: 'uptime && df -h / && free -h 2>&1',
+  'download-scripts': 'cd /opt/aishipan && GH_TOKEN=$(git remote get-url origin | sed "s|https://||;s|@github.com.*||") && curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/lpw0421/aishipan/contents/server/patrol.sh?ref=master | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)[\'content\']).decode())" > server/patrol.sh && curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/lpw0421/aishipan/contents/server/setup-cron.sh?ref=master | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)[\'content\']).decode())" > server/setup-cron.sh && curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/lpw0421/aishipan/contents/server/feishu-sentiment.js?ref=master | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)[\'content\']).decode())" > server/feishu-sentiment.js && chmod +x server/patrol.sh server/setup-cron.sh && echo SCRIPTS_OK'
 }
 
 app.post('/api/admin/exec', (req, res) => {
