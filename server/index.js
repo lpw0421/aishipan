@@ -3834,7 +3834,229 @@ const ALLOWED_COMMANDS = {
   'setup-cron': 'cd /opt/aishipan && chmod +x server/patrol.sh && bash server/setup-cron.sh 2>&1',
   restart: 'pm2 restart aishipan 2>&1',
   uptime: 'uptime && df -h / && free -h 2>&1',
-  'init-scripts': 'cd /opt/aishipan && cat > server/patrol.sh << \'ENDOFFILE\'\n#!/bin/bash\n# ============================================\n# 服务器夜巡 — 每30分钟检查服务是否在线\n# 异常时通过飞书 API 发送告警\n# ============================================\n\nHEALTH_URL="http://127.0.0.1:3001/api/health"\nFEISHU_APP_ID="cli_aa9840c926385ccd"\nFEISHU_APP_SECRET="72AJWhp8LQff1V8nB6MOhhNiFH3J1wUG"\nALERT_OPEN_ID="ou_3d9a155051e5bc65f20f19e0f025eefa"\nMAX_RETRIES=3\nRETRY_SLEEP=10\n\nlog() {\n  echo "[$(date \'+%Y-%m-%d %H:%M:%S\')] $1"\n}\n\nsend_alert() {\n  local msg="$1"\n  local token_resp\n  token_resp=$(curl -s -X POST \'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal\' \\n    -H \'Content-Type: application/json\' \\n    -d "{\"app_id\":\"${FEISHU_APP_ID}\",\"app_secret\":\"${FEISHU_APP_SECRET}\"}")\n  local token\n  token=$(echo "$token_resp" | grep -o \'"tenant_access_token":"[^"]*"\' | cut -d\'"\' -f4)\n\n  if [ -z "$token" ]; then\n    log "飞书token获取失败: $token_resp"\n    return 1\n  fi\n\n  local now\n  now=$(date \'+%Y-%m-%d %H:%M:%S\')\n  local content\n  content=$(cat <<EOF\n{"text":"🚨 服务器告警：aishipan.com 无法访问！\\n时间：${now}\\n详情：${msg}\\n请检查服务器状态。"}\nEOF\n)\n\n  curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id" \\n    -H "Authorization: Bearer ${token}" \\n    -H \'Content-Type: application/json\' \\n    -d "{\"receive_id\":\"${ALERT_OPEN_ID}\",\"msg_type\":\"text\",\"content\":\"${content}\"}" \\n    > /dev/null\n\n  log "告警已发送"\n}\n\n# 三次重试\nfor i in $(seq 1 $MAX_RETRIES); do\n  http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$HEALTH_URL" 2>/dev/null)\n  if [ "$http_code" = "200" ]; then\n    # 正常，静默退出\n    exit 0\n  fi\n  log "第${i}次检查失败，HTTP ${http_code}，${RETRY_SLEEP}秒后重试..."\n  sleep $RETRY_SLEEP\ndone\n\n# 三次都失败，发送告警\nsend_alert "连续${MAX_RETRIES}次健康检查失败，服务器可能已宕机"\nexit 1\n\nENDOFFILE\n && cat > server/setup-cron.sh << \'ENDOFFILE\'\n#!/bin/bash\n# ============================================\n# 定时任务安装脚本\n# 用法: sudo bash /opt/aishipan/server/setup-cron.sh\n# ============================================\nset -e\n\necho "=== AI食安 定时任务安装 ==="\n\n# 0. 检测 node 路径\nNODE_PATH=$(which node 2>/dev/null || echo "/usr/bin/node")\necho "Node.js 路径: $NODE_PATH"\n\n# 1. 赋予脚本执行权限\nchmod +x /opt/aishipan/server/patrol.sh\n\n# 2. 写 crontab（保留已有任务，去重追加）\nCRON_FILE="/tmp/aishipan-crontab"\n\n# 导出当前 crontab\ncrontab -l 2>/dev/null > "$CRON_FILE" || true\n\n# 删除旧的同名任务（如果有）\nsed -i \'/aishipan/d\' "$CRON_FILE"\n\ncat >> "$CRON_FILE" << CRONEOF\n\n# ===== AI食安 定时任务 =====\n# 服务器夜巡 — 每30分钟检查一次\n*/30 * * * * /opt/aishipan/server/patrol.sh >> /var/log/aishipan-patrol.log 2>&1\n# 法规每日推送 — 每天早上8:00\n0 8  * * * ${NODE_PATH} /opt/aishipan/server/feishu-regulations.js >> /var/log/aishipan-regulations.log 2>&1\n# 舆情监控 — 每天早上8:30\n30 8 * * * ${NODE_PATH} /opt/aishipan/server/feishu-sentiment.js >> /var/log/aishipan-sentiment.log 2>&1\nCRONEOF\n\n# 3. 安装\ncrontab "$CRON_FILE"\nrm "$CRON_FILE"\n\n# 4. 验证\necho ""\necho "已安装的定时任务:"\ncrontab -l | grep aishipan\necho ""\necho "安装完成！日志文件:"\necho "  /var/log/aishipan-patrol.log"\necho "  /var/log/aishipan-regulations.log"\necho "  /var/log/aishipan-sentiment.log"\n\nENDOFFILE\n && cat > server/feishu-sentiment.js << \'ENDOFFILE\'\n/**\n * 食品安全舆情监控 — 每日推送\n * 使用 DeepSeek API 整理近期食品安全违规/召回/抽检不合格新闻\n */\nconst fs = require(\'fs\')\nrequire(\'dotenv\').config({ path: \'/opt/aishipan/server/.env.production\' })\n\nconst APP_ID = process.env.FEISHU_APP_ID\nconst APP_SECRET = process.env.FEISHU_APP_SECRET\nconst AI_KEY = process.env.AI_API_KEY\nconst USER_OPEN_ID = process.env.FEISHU_ALERT_OPEN_ID\nconst AI_URL = (process.env.AI_BASE_URL || \'https://api.deepseek.com\') + \'/v1/chat/completions\'\n\nasync function getToken() {\n  const res = await fetch(\'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal\', {\n    method: \'POST\',\n    headers: { \'Content-Type\': \'application/json\' },\n    body: JSON.stringify({ app_id: APP_ID, app_secret: APP_SECRET })\n  })\n  const data = await res.json()\n  if (!data.tenant_access_token) throw new Error(\'飞书token获取失败: \' + JSON.stringify(data))\n  return data.tenant_access_token\n}\n\nasync function getSentimentNews() {\n  if (!AI_KEY) return \'AI未配置\'\n\n  const today = new Date().toLocaleDateString(\'zh-CN\', { year: \'numeric\', month: \'long\', day: \'numeric\' })\n\n  const res = await fetch(AI_URL, {\n    method: \'POST\',\n    headers: { \'Content-Type\': \'application/json\', \'Authorization\': \'Bearer \' + AI_KEY },\n    body: JSON.stringify({\n      model: \'deepseek-chat\',\n      messages: [\n        {\n          role: \'system\',\n          content: `你是食品安全舆情监控助手。请根据你的知识，列出最近两周内中国食品安全领域最值得关注的舆情事件（3~5条）。\n\n筛选标准：\n1. 重大食品召回/安全事件\n2. 知名品牌被处罚/曝光\n3. 市场监管总局抽检中发现的严重问题（兽药残留、违法添加、假冒伪劣等）\n4. 引发社会广泛关注的食品安全话题\n\n对每个事件，严格按以下格式输出：\n---\n⚠️ **事件标题（一句话）**\n- 来源：发布机构/媒体\n- 时间：YYYY-MM-DD\n- 概要：一句话概括核心问题\n- 影响：对食品企业的启示\n---\n\n如果近期没有重大事件，输出"今日无重大食安舆情"。\n\n末尾加一句：⚠️ 以上信息基于AI知识库，具体请以官方发布为准。`}\n        , { role: \'user\', content: `今天是${today}，请整理近期重大食品安全舆情事件。只推送真正有价值的信息，日常例行抽检结果不必列入。` }\n      ],\n      max_tokens: 1500,\n      temperature: 0.3\n    })\n  })\n  const data = await res.json()\n  return data.choices?.[0]?.message?.content || \'舆情信息获取失败\'\n}\n\nasync function sendMessage(token, content) {\n  await fetch(\'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id\', {\n    method: \'POST\',\n    headers: { \'Authorization\': `Bearer ${token}`, \'Content-Type\': \'application/json\' },\n    body: JSON.stringify({\n      receive_id: USER_OPEN_ID,\n      msg_type: \'text\',\n      content: JSON.stringify({ text: content })\n    })\n  })\n}\n\nasync function main() {\n  try {\n    console.log(\'[舆情监控] 开始获取...\')\n    const token = await getToken()\n    const news = await getSentimentNews()\n\n    // 无重大事件则静默退出\n    if (news.includes(\'无重大食安舆情\')) {\n      console.log(\'[舆情监控] 今日无重大事件，静默退出\')\n      return\n    }\n\n    const today = new Date().toLocaleDateString(\'zh-CN\')\n    const msg = `🔍 食安舆情预警 — ${today}\n\n${news}`\n    await sendMessage(token, msg)\n    console.log(\'[舆情监控] 推送成功\')\n  } catch (e) {\n    console.error(\'[舆情监控] 失败:\', e.message)\n    process.exit(1)\n  }\n}\n\nmain()\n\nENDOFFILE\n && chmod +x server/patrol.sh server/setup-cron.sh && echo SCRIPTS_OK'
+  'init-scripts': `cd /opt/aishipan && cat > server/patrol.sh << 'ENDOFFILE'
+#!/bin/bash
+# ============================================
+# 服务器夜巡 — 每30分钟检查服务是否在线
+# 异常时通过飞书 API 发送告警
+# ============================================
+
+HEALTH_URL="http://127.0.0.1:3001/api/health"
+FEISHU_APP_ID="cli_aa9840c926385ccd"
+FEISHU_APP_SECRET="72AJWhp8LQff1V8nB6MOhhNiFH3J1wUG"
+ALERT_OPEN_ID="ou_3d9a155051e5bc65f20f19e0f025eefa"
+MAX_RETRIES=3
+RETRY_SLEEP=10
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+send_alert() {
+  local msg="$1"
+  local token_resp
+  token_resp=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \\
+    -H 'Content-Type: application/json' \\
+    -d "{\\"app_id\\":\\"\${FEISHU_APP_ID}\\",\\"app_secret\\":\\"\${FEISHU_APP_SECRET}\\"}")
+  local token
+  token=$(echo "$token_resp" | grep -o '"tenant_access_token":"[^"]*"' | cut -d'"' -f4)
+
+  if [ -z "$token" ]; then
+    log "飞书token获取失败: $token_resp"
+    return 1
+  fi
+
+  local now
+  now=$(date '+%Y-%m-%d %H:%M:%S')
+  local content
+  content=$(cat <<EOF
+{"text":"🚨 服务器告警：aishipan.com 无法访问！\\\\n时间：\${now}\\\\n详情：\${msg}\\\\n请检查服务器状态。"}
+EOF
+)
+
+  curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id" \\
+    -H "Authorization: Bearer \${token}" \\
+    -H 'Content-Type: application/json' \\
+    -d "{\\"receive_id\\":\\"\${ALERT_OPEN_ID}\\",\\"msg_type\\":\\"text\\",\\"content\\":\\"\${content}\\"}" \\
+    > /dev/null
+
+  log "告警已发送"
+}
+
+# 三次重试
+for i in $(seq 1 $MAX_RETRIES); do
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$HEALTH_URL" 2>/dev/null)
+  if [ "$http_code" = "200" ]; then
+    # 正常，静默退出
+    exit 0
+  fi
+  log "第\${i}次检查失败，HTTP \${http_code}，\${RETRY_SLEEP}秒后重试..."
+  sleep $RETRY_SLEEP
+done
+
+# 三次都失败，发送告警
+send_alert "连续\${MAX_RETRIES}次健康检查失败，服务器可能已宕机"
+exit 1
+
+ENDOFFILE
+ && cat > server/setup-cron.sh << 'ENDOFFILE'
+#!/bin/bash
+# ============================================
+# 定时任务安装脚本
+# 用法: sudo bash /opt/aishipan/server/setup-cron.sh
+# ============================================
+set -e
+
+echo "=== AI食安 定时任务安装 ==="
+
+# 0. 检测 node 路径
+NODE_PATH=$(which node 2>/dev/null || echo "/usr/bin/node")
+echo "Node.js 路径: $NODE_PATH"
+
+# 1. 赋予脚本执行权限
+chmod +x /opt/aishipan/server/patrol.sh
+
+# 2. 写 crontab（保留已有任务，去重追加）
+CRON_FILE="/tmp/aishipan-crontab"
+
+# 导出当前 crontab
+crontab -l 2>/dev/null > "$CRON_FILE" || true
+
+# 删除旧的同名任务（如果有）
+sed -i '/aishipan/d' "$CRON_FILE"
+
+cat >> "$CRON_FILE" << CRONEOF
+
+# ===== AI食安 定时任务 =====
+# 服务器夜巡 — 每30分钟检查一次
+*/30 * * * * /opt/aishipan/server/patrol.sh >> /var/log/aishipan-patrol.log 2>&1
+# 法规每日推送 — 每天早上8:00
+0 8  * * * \${NODE_PATH} /opt/aishipan/server/feishu-regulations.js >> /var/log/aishipan-regulations.log 2>&1
+# 舆情监控 — 每天早上8:30
+30 8 * * * \${NODE_PATH} /opt/aishipan/server/feishu-sentiment.js >> /var/log/aishipan-sentiment.log 2>&1
+CRONEOF
+
+# 3. 安装
+crontab "$CRON_FILE"
+rm "$CRON_FILE"
+
+# 4. 验证
+echo ""
+echo "已安装的定时任务:"
+crontab -l | grep aishipan
+echo ""
+echo "安装完成！日志文件:"
+echo "  /var/log/aishipan-patrol.log"
+echo "  /var/log/aishipan-regulations.log"
+echo "  /var/log/aishipan-sentiment.log"
+
+ENDOFFILE
+ && cat > server/feishu-sentiment.js << 'ENDOFFILE'
+/**
+ * 食品安全舆情监控 — 每日推送
+ * 使用 DeepSeek API 整理近期食品安全违规/召回/抽检不合格新闻
+ */
+const fs = require('fs')
+require('dotenv').config({ path: '/opt/aishipan/server/.env.production' })
+
+const APP_ID = process.env.FEISHU_APP_ID
+const APP_SECRET = process.env.FEISHU_APP_SECRET
+const AI_KEY = process.env.AI_API_KEY
+const USER_OPEN_ID = process.env.FEISHU_ALERT_OPEN_ID
+const AI_URL = (process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions'
+
+async function getToken() {
+  const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ app_id: APP_ID, app_secret: APP_SECRET })
+  })
+  const data = await res.json()
+  if (!data.tenant_access_token) throw new Error('飞书token获取失败: ' + JSON.stringify(data))
+  return data.tenant_access_token
+}
+
+async function getSentimentNews() {
+  if (!AI_KEY) return 'AI未配置'
+
+  const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  const res = await fetch(AI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_KEY },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: \`你是食品安全舆情监控助手。请根据你的知识，列出最近两周内中国食品安全领域最值得关注的舆情事件（3~5条）。
+
+筛选标准：
+1. 重大食品召回/安全事件
+2. 知名品牌被处罚/曝光
+3. 市场监管总局抽检中发现的严重问题（兽药残留、违法添加、假冒伪劣等）
+4. 引发社会广泛关注的食品安全话题
+
+对每个事件，严格按以下格式输出：
+---
+⚠️ **事件标题（一句话）**
+- 来源：发布机构/媒体
+- 时间：YYYY-MM-DD
+- 概要：一句话概括核心问题
+- 影响：对食品企业的启示
+---
+
+如果近期没有重大事件，输出"今日无重大食安舆情"。
+
+末尾加一句：⚠️ 以上信息基于AI知识库，具体请以官方发布为准。\`}
+        , { role: 'user', content: \`今天是\${today}，请整理近期重大食品安全舆情事件。只推送真正有价值的信息，日常例行抽检结果不必列入。\` }
+      ],
+      max_tokens: 1500,
+      temperature: 0.3
+    })
+  })
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content || '舆情信息获取失败'
+}
+
+async function sendMessage(token, content) {
+  await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+    method: 'POST',
+    headers: { 'Authorization': \`Bearer \${token}\`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      receive_id: USER_OPEN_ID,
+      msg_type: 'text',
+      content: JSON.stringify({ text: content })
+    })
+  })
+}
+
+async function main() {
+  try {
+    console.log('[舆情监控] 开始获取...')
+    const token = await getToken()
+    const news = await getSentimentNews()
+
+    // 无重大事件则静默退出
+    if (news.includes('无重大食安舆情')) {
+      console.log('[舆情监控] 今日无重大事件，静默退出')
+      return
+    }
+
+    const today = new Date().toLocaleDateString('zh-CN')
+    const msg = \`🔍 食安舆情预警 — \${today}\\n\\n\${news}\`
+    await sendMessage(token, msg)
+    console.log('[舆情监控] 推送成功')
+  } catch (e) {
+    console.error('[舆情监控] 失败:', e.message)
+    process.exit(1)
+  }
+}
+
+main()
+
+ENDOFFILE
+ && chmod +x server/patrol.sh server/setup-cron.sh && echo SCRIPTS_OK`
 }
 
 app.post('/api/admin/exec', (req, res) => {
