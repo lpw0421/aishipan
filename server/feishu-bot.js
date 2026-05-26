@@ -40,6 +40,55 @@ async function sendReply(msgId, content) {
   })
 }
 
+// ===== 管理员命令处理 =====
+const ADMIN_OPEN_ID = process.env.FEISHU_ALERT_OPEN_ID
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'aishipan2024'
+const { execSync } = require('child_process')
+
+const ALLOWED_COMMANDS = {
+  'deploy': 'cd /opt/aishipan && git stash && git pull && cd client && npm run build && nginx -s reload && echo DEPLOY_OK',
+  'pull': 'cd /opt/aishipan && git pull 2>&1',
+  'build': 'cd /opt/aishipan/client && npm run build 2>&1 && nginx -s reload && echo BUILD_OK',
+  'status': "pm2 list 2>&1 && echo '---' && curl -s http://127.0.0.1:3001/api/health",
+  'logs': 'pm2 logs aishipan --lines 20 --nostream 2>&1',
+  'cron': 'crontab -l 2>&1',
+  'setup-cron': 'cd /opt/aishipan && chmod +x server/patrol.sh && bash server/setup-cron.sh 2>&1',
+  'restart': 'pm2 restart aishipan 2>&1',
+  'uptime': 'uptime && df -h / && free -h 2>&1'
+}
+
+async function handleAdminCommand(msgId, senderOpenId, text) {
+  // 安全检查：只响应指定用户的命令
+  if (senderOpenId !== ADMIN_OPEN_ID) {
+    console.log('[管理] 未授权的用户:', senderOpenId)
+    return false
+  }
+
+  // 解析命令: /admin [secret] [command]
+  const parts = text.trim().split(/\s+/)
+  if (parts.length < 3) return false
+  if (parts[0] !== '/admin') return false
+  if (parts[1] !== ADMIN_SECRET) {
+    await sendReply(msgId, '密钥错误')
+    return true
+  }
+
+  const cmd = ALLOWED_COMMANDS[parts[2]]
+  if (!cmd) {
+    await sendReply(msgId, '未知命令。可用命令: ' + Object.keys(ALLOWED_COMMANDS).join(', '))
+    return true
+  }
+
+  try {
+    const output = execSync(cmd, { timeout: 60000, encoding: 'utf8', maxBuffer: 1024 * 1024 })
+    const preview = output.slice(-800) // 只返回最后800字符
+    await sendReply(msgId, '✅ 执行成功:\n' + preview)
+  } catch (e) {
+    await sendReply(msgId, '❌ 执行失败:\n' + (e.stderr || e.message).slice(-500))
+  }
+  return true
+}
+
 // AI 对话
 async function aiChat(message) {
   if (!AI_KEY) return 'AI未配置，请在.env中设置AI_API_KEY'
@@ -94,6 +143,11 @@ module.exports = async function feishuWebhook(req, res) {
 
       const userText = content.text?.trim()
       if (!userText) return
+
+      // 优先检查管理命令
+      const senderOpenId = event.sender?.open_id || ''
+      const isAdmin = await handleAdminCommand(msg.message_id, senderOpenId, userText)
+      if (isAdmin) return
 
       const reply = await aiChat(userText)
       await sendReply(msg.message_id, reply)
