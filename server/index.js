@@ -3819,9 +3819,46 @@ app.get('/api/supplier-quality/:supplier/detail', (req, res) => {
   res.json({ supplier, total, pass, reject, concession, acceptRate, score, level, recent_batches: batches })
 })
 
+// ---------- 远程管理接口 ----------
+
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'aishipan2024'
+const { execSync } = require('child_process')
+
+const ALLOWED_COMMANDS = {
+  deploy: 'cd /opt/aishipan && git stash && git pull && cd client && npm run build && nginx -s reload && echo DEPLOY_OK',
+  pull: 'cd /opt/aishipan && git pull 2>&1',
+  build: 'cd /opt/aishipan/client && npm run build 2>&1 && nginx -s reload && echo BUILD_OK',
+  status: "pm2 list 2>&1 && echo '---' && curl -s http://127.0.0.1:3001/api/health",
+  logs: 'pm2 logs aishipan --lines 20 --nostream 2>&1',
+  cron: 'crontab -l 2>&1',
+  'setup-cron': 'cd /opt/aishipan && chmod +x server/patrol.sh && bash server/setup-cron.sh 2>&1',
+  restart: 'pm2 restart aishipan 2>&1',
+  uptime: 'uptime && df -h / && free -h 2>&1'
+}
+
+app.post('/api/admin/exec', (req, res) => {
+  const { secret, cmd } = req.body
+
+  if (secret !== ADMIN_SECRET) {
+    return res.status(403).json({ error: '密钥错误' })
+  }
+
+  const command = ALLOWED_COMMANDS[cmd]
+  if (!command) {
+    return res.status(400).json({ error: '未知命令', available: Object.keys(ALLOWED_COMMANDS) })
+  }
+
+  try {
+    const output = execSync(command, { timeout: 120000, encoding: 'utf8', maxBuffer: 1024 * 1024 })
+    res.json({ ok: true, output: output.slice(-2000) })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e.stderr || e.message).slice(-1000) })
+  }
+})
+
 // ---------- 定时任务 ----------
 
-// 每天早上 9:00 执行临期证照检查（第二个参数：分钟 小时 日 月 星期）
+// 每天早上 9:00 执行临期证照检查
 cron.schedule('0 9 * * *', () => {
   checkAndNotify()
 })
