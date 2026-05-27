@@ -3828,7 +3828,7 @@ const ALLOWED_COMMANDS = {
   deploy: 'cd /opt/aishipan && git stash && git pull && cd client && npm run build && nginx -s reload && echo DEPLOY_OK',
   pull: 'cd /opt/aishipan && git pull 2>&1',
   build: 'cd /opt/aishipan/client && npm run build 2>&1 && nginx -s reload && echo BUILD_OK',
-  status: "pm2 list 2>&1 && echo '---' && curl -s http://127.0.0.1:3001/api/health",
+  status: "pm2 list 2>&1 && echo '---' && ls -la /opt/aishipan/server/index.js && echo '---' && cat /opt/aishipan/server/.env.production | head -1",
   logs: 'pm2 logs aishipan --lines 20 --nostream 2>&1',
   cron: 'crontab -l 2>&1',
   'setup-cron': 'cd /opt/aishipan && chmod +x server/patrol.sh && bash server/setup-cron.sh 2>&1',
