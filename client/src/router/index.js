@@ -30,9 +30,6 @@ const routes = [
         redirect: '/ai/smart',
         children: [
           { path: 'smart', component: () => import('../views/ai/SmartAudit.vue') },
-          { path: 'export', component: () => import('../views/ai/ExportAudit.vue') },
-          { path: 'nutrition', component: () => import('../views/ai/NutritionGen.vue') },
-          { path: 'ingredients', component: () => import('../views/ai/IngredientsVerify.vue') },
           { path: 'supplier-score', component: () => import('../views/ai/SupplierScore.vue') },
           { path: 'complaint-classify', component: () => import('../views/ai/ComplaintClassify.vue') },
           { path: 'complaint-reply', component: () => import('../views/ai/ComplaintReply.vue') },

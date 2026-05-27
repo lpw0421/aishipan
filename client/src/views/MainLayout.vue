@@ -90,18 +90,6 @@
             <el-icon><Document /></el-icon>
             <span>标签审核</span>
           </el-menu-item>
-          <el-menu-item index="/ai/export">
-            <el-icon><Promotion /></el-icon>
-            <span>多国出口审核</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/nutrition">
-            <el-icon><DataAnalysis /></el-icon>
-            <span>营养成分生成</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/ingredients">
-            <el-icon><List /></el-icon>
-            <span>配料表校验</span>
-          </el-menu-item>
           <el-menu-item index="/ai/supplier-score">
             <el-icon><StarFilled /></el-icon>
             <span>供应商评分</span>
@@ -346,8 +334,6 @@ import {
   Medal,
   EditPen,
   MagicStick,
-  Promotion,
-  DataAnalysis,
   List,
   StarFilled,
   ChatDotSquare,
