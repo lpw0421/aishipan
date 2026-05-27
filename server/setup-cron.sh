@@ -28,10 +28,18 @@ cat >> "$CRON_FILE" << CRONEOF
 # ===== AI食安 定时任务 =====
 # 服务器夜巡 — 每30分钟检查一次
 */30 * * * * /opt/aishipan/server/patrol.sh >> /var/log/aishipan-patrol.log 2>&1
-# 法规每日推送 — 每天早上8:00
-0 8  * * * ${NODE_PATH} /opt/aishipan/server/feishu-regulations.js >> /var/log/aishipan-regulations.log 2>&1
-# 舆情监控 — 每天早上8:30
+# 早间简报 — 每天 8:07
+7 8 * * * ${NODE_PATH} /opt/aishipan/server/morning-briefing.js >> /var/log/aishipan-briefing.log 2>&1
+# 法规每日推送 — 每天 8:00
+0 8 * * * ${NODE_PATH} /opt/aishipan/server/feishu-regulations.js >> /var/log/aishipan-regulations.log 2>&1
+# AI热闻 — 每天 8:23
+23 8 * * * ${NODE_PATH} /opt/aishipan/server/ai-hotnews.js >> /var/log/aishipan-hotnews.log 2>&1
+# 舆情监控 — 每天 8:30
 30 8 * * * ${NODE_PATH} /opt/aishipan/server/feishu-sentiment.js >> /var/log/aishipan-sentiment.log 2>&1
+# 岗位雷达 — 工作日 9:07
+7 9 * * 1-5 ${NODE_PATH} /opt/aishipan/server/job-radar.js >> /var/log/aishipan-jobradar.log 2>&1
+# 副业线索 — 工作日 9:23
+23 9 * * 1-5 ${NODE_PATH} /opt/aishipan/server/sidegig-leads.js >> /var/log/aishipan-sidegig.log 2>&1
 CRONEOF
 
 # 3. 安装
