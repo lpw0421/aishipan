@@ -250,6 +250,9 @@
         <div class="header-left">
           <span class="system-name">AI 食安</span>
         </div>
+        <div class="header-center">
+          <span class="date-time">{{ currentTime }}</span>
+        </div>
         <div class="header-right">
           <!-- 通知铃铛 -->
           <el-popover
@@ -259,8 +262,8 @@
             @show="fetchNotifications"
           >
             <template #reference>
-              <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99" class="notify-badge">
-                <el-icon :size="22" class="bell-icon"><Bell /></el-icon>
+              <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99">
+                <el-button type="default" circle :icon="Bell" class="bell-btn" />
               </el-badge>
             </template>
             <div class="notify-panel">
@@ -339,9 +342,7 @@ import {
   ChatDotSquare,
   TrendCharts,
   CollectionTag,
-  Search,
-  Connection,
-  Finished
+  Search
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -349,6 +350,14 @@ const route = useRoute()
 
 // 当前激活的路由路径（菜单高亮用）
 const currentRoute = computed(() => route.path)
+
+// 实时日期时间
+const currentTime = ref('')
+const updateTime = () => {
+  const now = new Date()
+  const weekMap = ['日', '一', '二', '三', '四', '五', '六']
+  currentTime.value = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 周${weekMap[now.getDay()]} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+}
 
 // 从 localStorage 获取当前登录用户名
 const userStr = localStorage.getItem('user')
@@ -395,12 +404,17 @@ const readAll = async () => {
   } catch {}
 }
 
+let timeTimer = null
+
 onMounted(() => {
+  updateTime()
+  timeTimer = setInterval(updateTime, 1000)
   fetchNotifications()
-  pollTimer = setInterval(fetchNotifications, 60000)  // 每分钟刷新
+  pollTimer = setInterval(fetchNotifications, 60000)
 })
 
 onUnmounted(() => {
+  clearInterval(timeTimer)
   clearInterval(pollTimer)
 })
 </script>
@@ -439,10 +453,38 @@ onUnmounted(() => {
   padding: 0 20px;
   height: 60px;
 }
+.header-left {
+  min-width: 100px;
+}
 .system-name {
   font-size: 18px;
   font-weight: bold;
   color: #303133;
+}
+.header-center {
+  flex: 1;
+  text-align: center;
+}
+.date-time {
+  font-size: 14px;
+  color: #606266;
+  letter-spacing: 0.5px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.bell-btn {
+  font-size: 20px;
+  border: none;
+  background: none;
+  color: #606266;
+  box-shadow: none;
+}
+.bell-btn:hover {
+  color: #409eff;
+  background: #ecf5ff;
 }
 .user-info {
   display: flex;
@@ -457,14 +499,6 @@ onUnmounted(() => {
 }
 
 /* ===== 通知 ===== */
-.bell-icon {
-  cursor: pointer;
-  color: #606266;
-  margin-right: 20px;
-}
-.bell-icon:hover {
-  color: #409eff;
-}
 .notify-badge {
   display: flex;
   align-items: center;
