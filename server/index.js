@@ -3826,7 +3826,7 @@ const { execSync } = require('child_process')
 
 const ALLOWED_COMMANDS = {
   // 一键同步 — 从 raw.githubusercontent.com 下载所有最新脚本并重启
-  sync: `cd /opt/aishipan/server && echo "[sync] 下载最新文件..." && curl -sS https://raw.githubusercontent.com/lpw0421/aishipan/master/server/index.js -o index.js && for f in patrol.sh setup-cron.sh feishu-sentiment.js feishu-regulations.js morning-briefing.js ai-hotnews.js job-radar.js sidegig-leads.js; do curl -sS https://raw.githubusercontent.com/lpw0421/aishipan/server/\$f -o \$f && echo "  OK: \$f"; done && chmod +x patrol.sh setup-cron.sh && echo "[sync] 重启服务..." && pm2 restart aishipan && echo SYNC_OK`,
+  sync: `cd /opt/aishipan/server && echo "[sync] 下载最新文件..." && curl -sS https://raw.githubusercontent.com/lpw0421/aishipan/master/server/index.js -o index.js && for f in patrol.sh setup-cron.sh feishu-sentiment.js feishu-regulations.js morning-briefing.js ai-hotnews.js job-radar.js sidegig-leads.js; do curl -sS https://raw.githubusercontent.com/lpw0421/aishipan/master/server/\$f -o \$f && echo "  OK: \$f"; done && chmod +x patrol.sh setup-cron.sh && echo "[sync] 重启服务..." && pm2 restart aishipan && echo SYNC_OK`,
   deploy: 'cd /opt/aishipan && bash server/setup-cron.sh 2>&1',
   pull: 'cd /opt/aishipan && git pull 2>&1',
   build: 'cd /opt/aishipan/client && npm run build 2>&1 && nginx -s reload && echo BUILD_OK',
