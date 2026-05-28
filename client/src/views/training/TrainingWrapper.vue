@@ -5,19 +5,19 @@
     </div>
     <el-tabs v-model="activeTab" class="main-tabs">
       <el-tab-pane label="培训计划" name="plans">
-        <TrainingPlans />
+        <TrainingPlans v-if="activeTab === 'plans'" />
       </el-tab-pane>
       <el-tab-pane label="培训课程" name="courses">
-        <TrainingCourses />
+        <TrainingCourses v-if="activeTab === 'courses'" />
       </el-tab-pane>
       <el-tab-pane label="培训记录" name="records">
-        <TrainingRecords />
+        <TrainingRecords v-if="activeTab === 'records'" />
       </el-tab-pane>
       <el-tab-pane label="考核管理" name="exams">
-        <TrainingExams />
+        <TrainingExams v-if="activeTab === 'exams'" />
       </el-tab-pane>
       <el-tab-pane label="证书管理" name="certs">
-        <TrainingCerts />
+        <TrainingCerts v-if="activeTab === 'certs'" />
       </el-tab-pane>
     </el-tabs>
   </div>

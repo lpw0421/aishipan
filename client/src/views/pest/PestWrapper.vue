@@ -5,22 +5,22 @@
     </div>
     <el-tabs v-model="activeTab" class="main-tabs">
       <el-tab-pane label="供应商资质" name="supplier">
-        <PestSupplier />
+        <PestSupplier v-if="activeTab === 'supplier'" />
       </el-tab-pane>
       <el-tab-pane label="人员管理" name="staff">
-        <PestStaff />
+        <PestStaff v-if="activeTab === 'staff'" />
       </el-tab-pane>
       <el-tab-pane label="化学品管理" name="chemicals">
-        <PestChemicals />
+        <PestChemicals v-if="activeTab === 'chemicals'" />
       </el-tab-pane>
       <el-tab-pane label="服务记录" name="service-records">
-        <PestServiceRecords />
+        <PestServiceRecords v-if="activeTab === 'service-records'" />
       </el-tab-pane>
       <el-tab-pane label="服务报告" name="service-reports">
-        <PestServiceReports />
+        <PestServiceReports v-if="activeTab === 'service-reports'" />
       </el-tab-pane>
       <el-tab-pane label="投诉整改" name="complaints">
-        <PestComplaints />
+        <PestComplaints v-if="activeTab === 'complaints'" />
       </el-tab-pane>
     </el-tabs>
   </div>

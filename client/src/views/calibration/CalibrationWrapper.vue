@@ -5,19 +5,19 @@
     </div>
     <el-tabs v-model="activeTab" class="main-tabs">
       <el-tab-pane label="设备台账" name="devices">
-        <CalibrationDevices />
+        <CalibrationDevices v-if="activeTab === 'devices'" />
       </el-tab-pane>
       <el-tab-pane label="校准计划" name="plans">
-        <CalibrationPlans />
+        <CalibrationPlans v-if="activeTab === 'plans'" />
       </el-tab-pane>
       <el-tab-pane label="校准记录" name="records">
-        <CalibrationRecords />
+        <CalibrationRecords v-if="activeTab === 'records'" />
       </el-tab-pane>
       <el-tab-pane label="校准机构" name="agencies">
-        <CalibrationAgencies />
+        <CalibrationAgencies v-if="activeTab === 'agencies'" />
       </el-tab-pane>
       <el-tab-pane label="异常处理" name="exceptions">
-        <CalibrationExceptions />
+        <CalibrationExceptions v-if="activeTab === 'exceptions'" />
       </el-tab-pane>
     </el-tabs>
   </div>

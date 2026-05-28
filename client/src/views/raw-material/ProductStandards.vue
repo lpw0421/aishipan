@@ -356,15 +356,15 @@
       </el-tab-pane>
 
       <el-tab-pane label="不合格品" name="nonconforming">
-        <NonConforming source-type="成品检验" />
+        <NonConforming v-if="activeTab === 'nonconforming'" source-type="成品检验" />
       </el-tab-pane>
 
       <el-tab-pane label="留样管理" name="samples">
-        <Samples sample-type="成品留样" />
+        <Samples v-if="activeTab === 'samples'" sample-type="成品留样" />
       </el-tab-pane>
 
       <el-tab-pane label="客诉管理" name="complaint">
-        <ComplaintWrapper />
+        <ComplaintWrapper v-if="activeTab === 'complaint'" />
       </el-tab-pane>
     </el-tabs>
   </div>

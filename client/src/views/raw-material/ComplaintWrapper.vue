@@ -9,16 +9,16 @@
 
     <el-tabs v-model="subTab" class="sub-tabs">
       <el-tab-pane label="客诉看板" name="dashboard">
-        <ComplaintDashboard />
+        <ComplaintDashboard v-if="subTab === 'dashboard'" />
       </el-tab-pane>
       <el-tab-pane label="客诉列表" name="list">
-        <ComplaintList />
+        <ComplaintList v-if="subTab === 'list'" />
       </el-tab-pane>
       <el-tab-pane label="客诉处理" name="handle">
-        <ComplaintHandle />
+        <ComplaintHandle v-if="subTab === 'handle'" />
       </el-tab-pane>
       <el-tab-pane label="满意度追踪" name="satisfaction">
-        <ComplaintSatisfaction />
+        <ComplaintSatisfaction v-if="subTab === 'satisfaction'" />
       </el-tab-pane>
     </el-tabs>
   </div>

@@ -5,10 +5,10 @@
     </div>
     <el-tabs v-model="activeTab" class="main-tabs">
       <el-tab-pane label="人员信息" name="info">
-        <Personnel />
+        <Personnel v-if="activeTab === 'info'" />
       </el-tab-pane>
       <el-tab-pane label="健康证管理" name="health">
-        <HealthCerts />
+        <HealthCerts v-if="activeTab === 'health'" />
       </el-tab-pane>
     </el-tabs>
   </div>

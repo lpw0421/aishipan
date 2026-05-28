@@ -318,15 +318,15 @@
       </el-tab-pane>
 
       <el-tab-pane label="验收记录" name="inspection">
-        <Inspection />
+        <Inspection v-if="activeTab === 'inspection'" />
       </el-tab-pane>
 
       <el-tab-pane label="不合格品" name="nonconforming">
-        <NonConforming source-type="原料验收" />
+        <NonConforming v-if="activeTab === 'nonconforming'" source-type="原料验收" />
       </el-tab-pane>
 
       <el-tab-pane label="留样管理" name="samples">
-        <Samples sample-type="原料留样" />
+        <Samples v-if="activeTab === 'samples'" sample-type="原料留样" />
       </el-tab-pane>
     </el-tabs>
   </div>
