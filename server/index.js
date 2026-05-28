@@ -3911,6 +3911,16 @@ app.get('/api/supplier-quality/:supplier/detail', (req, res) => {
 
 // ---- 人员管理 ----
 
+// 创建 personnel 表（兼容旧数据库，db.js 迁移）
+db.exec(`CREATE TABLE IF NOT EXISTS personnel (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+  employee_number TEXT DEFAULT '', name TEXT NOT NULL,
+  department TEXT DEFAULT '', position TEXT DEFAULT '',
+  phone TEXT DEFAULT '', entry_date TEXT DEFAULT '',
+  health_cert_expiry TEXT DEFAULT '', status TEXT DEFAULT '在职',
+  remarks TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME,
+  FOREIGN KEY (user_id) REFERENCES users(id))`)
+
 app.get('/api/personnel', (req, res) => {
   const { user_id, keyword, department, status } = req.query
   let sql = 'SELECT * FROM personnel WHERE user_id = ?'
@@ -3959,6 +3969,17 @@ app.delete('/api/personnel/:id', (req, res) => {
 })
 
 // ---- 三方管理 ----
+
+// 创建 third_party 表（兼容旧数据库，db.js 迁移）
+db.exec(`CREATE TABLE IF NOT EXISTS third_party (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+  vendor_number TEXT DEFAULT '', vendor_name TEXT NOT NULL,
+  vendor_type TEXT DEFAULT '检测机构', contact_person TEXT DEFAULT '',
+  phone TEXT DEFAULT '', address TEXT DEFAULT '',
+  qualification_expiry TEXT DEFAULT '', service_scope TEXT DEFAULT '',
+  status TEXT DEFAULT '合作中', remarks TEXT DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME,
+  FOREIGN KEY (user_id) REFERENCES users(id))`)
 
 app.get('/api/third-party', (req, res) => {
   const { user_id, keyword, vendor_type, status } = req.query
