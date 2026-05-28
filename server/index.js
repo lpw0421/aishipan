@@ -4063,7 +4063,7 @@ app.post('/api/admin/exec', (req, res) => {
   }
 
   try {
-    const output = execSync(command, { timeout: 120000, encoding: 'utf8', maxBuffer: 1024 * 1024 })
+    const output = execSync(command, { timeout: 300000, encoding: 'utf8', maxBuffer: 1024 * 1024 })
     res.json({ ok: true, output: output.slice(-2000) })
   } catch (e) {
     res.status(500).json({ ok: false, error: (e.stderr || e.message).slice(-1000) })
