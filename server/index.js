@@ -68,11 +68,10 @@ function sanitizeUploadBody(req, res, next) {
   next()
 }
 
-// 通用限流：每个 IP 每分钟最多 100 次请求
-// express-rate-limit v8: standardHeaders/legacyHeaders 已废弃，使用默认头
+// 通用限流：每个 IP 每分钟最多 1000 次请求（开发环境放宽）
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 1000,
   message: { message: '请求过于频繁，请稍后再试' }
 })
 
@@ -3160,13 +3159,16 @@ app.delete('/api/calibration/exceptions/:id', (req, res) => {
 
 app.get('/api/raw-materials', (req, res) => {
   const { user_id, keyword, category, risk_level, status } = req.query
-  let sql = 'SELECT * FROM raw_materials WHERE user_id = ?'
+  let sql = `SELECT rm.*, CASE WHEN rms.id IS NOT NULL THEN 1 ELSE 0 END AS hasStandard
+    FROM raw_materials rm
+    LEFT JOIN raw_material_standards rms ON rms.material_id = rm.id
+    WHERE rm.user_id = ?`
   const params = [user_id]
-  if (category) { sql += ' AND category = ?'; params.push(category) }
-  if (risk_level) { sql += ' AND risk_level = ?'; params.push(risk_level) }
-  if (status) { sql += ' AND status = ?'; params.push(status) }
-  if (keyword) { sql += ' AND (material_name LIKE ? OR material_number LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%') }
-  sql += ' ORDER BY created_at DESC'
+  if (category) { sql += ' AND rm.category = ?'; params.push(category) }
+  if (risk_level) { sql += ' AND rm.risk_level = ?'; params.push(risk_level) }
+  if (status) { sql += ' AND rm.status = ?'; params.push(status) }
+  if (keyword) { sql += ' AND (rm.material_name LIKE ? OR rm.material_number LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%') }
+  sql += ' ORDER BY rm.created_at DESC'
   const list = db.prepare(sql).all(...params)
   res.json({ list })
 })
@@ -3200,6 +3202,45 @@ app.delete('/api/raw-materials/:id', (req, res) => {
   if (!existing) return res.status(404).json({ message: '原料不存在' })
   db.prepare('DELETE FROM raw_materials WHERE id = ?').run(id)
   res.json({ message: '原料已删除' })
+})
+
+// 批量删除原料
+app.post('/api/raw-materials/batch-delete', (req, res) => {
+  const { user_id, ids } = req.body
+  if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择原料' })
+  const placeholders = ids.map(() => '?').join(',')
+  db.prepare(`DELETE FROM raw_materials WHERE id IN (${placeholders}) AND user_id = ?`).run(...ids, user_id)
+  res.json({ message: `已删除 ${ids.length} 项` })
+})
+
+// 批量修改状态
+app.post('/api/raw-materials/batch-status', (req, res) => {
+  const { user_id, ids, status } = req.body
+  if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择原料' })
+  const placeholders = ids.map(() => '?').join(',')
+  db.prepare(`UPDATE raw_materials SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders}) AND user_id = ?`).run(status, ...ids, user_id)
+  res.json({ message: '批量操作成功' })
+})
+
+// 导出原料 Excel
+app.get('/api/raw-materials/export', (req, res) => {
+  const { user_id, ids } = req.query
+  let rows
+  if (ids) {
+    const idArr = ids.split(',').map(Number)
+    const placeholders = idArr.map(() => '?').join(',')
+    rows = db.prepare(`SELECT * FROM raw_materials WHERE id IN (${placeholders}) AND user_id = ?`).all(...idArr, user_id)
+  } else {
+    rows = db.prepare('SELECT * FROM raw_materials WHERE user_id = ?').all(user_id)
+  }
+  // 简单 CSV 导出
+  const headers = ['原料编号', '原料名称', '类别', '风险等级', '规格', '保质期(月)', '储存条件', '执行标准', '过敏原', '状态']
+  const keys = ['material_number', 'material_name', 'category', 'risk_level', 'specification', 'shelf_life', 'storage_condition', 'executive_standard', 'allergen_info', 'status']
+  const bom = '﻿'
+  const csv = bom + headers.join(',') + '\n' + rows.map(r => keys.map(k => `"${(r[k] || '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename=raw-materials.csv')
+  res.send(csv)
 })
 
 // ---- 验收标准 ----
@@ -3523,6 +3564,55 @@ app.delete('/api/product-standards/indicators/:id', (req, res) => {
   res.json({ message: '指标已删除' })
 })
 
+// ---- 产品检验记录 ----
+
+app.get('/api/product-inspections', (req, res) => {
+  const { user_id, keyword, conclusion, inspection_type } = req.query
+  let sql = 'SELECT * FROM product_inspections WHERE user_id = ?'
+  const params = [user_id]
+  if (conclusion) { sql += ' AND conclusion = ?'; params.push(conclusion) }
+  if (inspection_type) { sql += ' AND inspection_type = ?'; params.push(inspection_type) }
+  if (keyword) { sql += ' AND (product_name LIKE ? OR product_batch LIKE ? OR inspector LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%', '%'+keyword+'%') }
+  sql += ' ORDER BY created_at DESC'
+  const list = db.prepare(sql).all(...params)
+  res.json({ list })
+})
+
+app.get('/api/product-inspections/stats', (req, res) => {
+  const { user_id } = req.query
+  const total = db.prepare('SELECT COUNT(*) AS cnt FROM product_inspections WHERE user_id = ?').get(user_id).cnt
+  const qualified = db.prepare("SELECT COUNT(*) AS cnt FROM product_inspections WHERE user_id = ? AND conclusion = '合格'").get(user_id).cnt
+  const unqualified = db.prepare("SELECT COUNT(*) AS cnt FROM product_inspections WHERE user_id = ? AND conclusion = '不合格'").get(user_id).cnt
+  const today = new Date().toISOString().slice(0, 10)
+  const todayCount = db.prepare("SELECT COUNT(*) AS cnt FROM product_inspections WHERE user_id = ? AND date(inspection_date) = ?").get(user_id, today).cnt
+  res.json({ total, qualified, unqualified, todayCount })
+})
+
+app.post('/api/product-inspections', (req, res) => {
+  const { user_id, product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks } = req.body
+  if (!product_name) return res.status(400).json({ message: '请填写产品名称' })
+  db.prepare(
+    'INSERT INTO product_inspections (user_id, product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, product_name, product_batch || '', product_standard_id || null, production_date || '', inspection_date || '', inspector || '', inspection_type || '出厂检验', sample_quantity || '', JSON.stringify(sensory_check || {}), JSON.stringify(理化_check || {}), JSON.stringify(micro_check || {}), JSON.stringify(net_weight_check || {}), conclusion || '', unqualified_items || '', remarks || '')
+  res.json({ message: '检验记录添加成功' })
+})
+
+app.put('/api/product-inspections/:id', (req, res) => {
+  const { id } = req.params
+  const existing = db.prepare('SELECT * FROM product_inspections WHERE id = ? AND user_id = ?').get(id, req.body.user_id)
+  if (!existing) return res.status(404).json({ message: '检验记录不存在' })
+  const { product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks } = req.body
+  db.prepare(
+    'UPDATE product_inspections SET product_name=?, product_batch=?, product_standard_id=?, production_date=?, inspection_date=?, inspector=?, inspection_type=?, sample_quantity=?, sensory_check=?, 理化_check=?, micro_check=?, net_weight_check=?, conclusion=?, unqualified_items=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
+  ).run(product_name || existing.product_name, product_batch || existing.product_batch, product_standard_id || existing.product_standard_id, production_date || existing.production_date, inspection_date || existing.inspection_date, inspector || existing.inspector, inspection_type || existing.inspection_type, sample_quantity || existing.sample_quantity, JSON.stringify(sensory_check || JSON.parse(existing.sensory_check || '{}')), JSON.stringify(理化_check || JSON.parse(existing.理化_check || '{}')), JSON.stringify(micro_check || JSON.parse(existing.micro_check || '{}')), JSON.stringify(net_weight_check || JSON.parse(existing.net_weight_check || '{}')), conclusion || existing.conclusion, unqualified_items || existing.unqualified_items, remarks || existing.remarks, id)
+  res.json({ message: '检验记录更新成功' })
+})
+
+app.delete('/api/product-inspections/:id', (req, res) => {
+  db.prepare('DELETE FROM product_inspections WHERE id = ? AND user_id = ?').run(req.params.id, req.body.user_id)
+  res.json({ message: '检验记录已删除' })
+})
+
 // ---- 检验项目 ----
 
 app.get('/api/test-items', (req, res) => {
@@ -3819,6 +3909,104 @@ app.get('/api/supplier-quality/:supplier/detail', (req, res) => {
   res.json({ supplier, total, pass, reject, concession, acceptRate, score, level, recent_batches: batches })
 })
 
+// ---- 人员管理 ----
+
+app.get('/api/personnel', (req, res) => {
+  const { user_id, keyword, department, status } = req.query
+  let sql = 'SELECT * FROM personnel WHERE user_id = ?'
+  const params = [user_id]
+  if (department) { sql += ' AND department = ?'; params.push(department) }
+  if (status) { sql += ' AND status = ?'; params.push(status) }
+  if (keyword) { sql += ' AND (name LIKE ? OR employee_number LIKE ? OR position LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%', '%'+keyword+'%') }
+  sql += ' ORDER BY created_at DESC'
+  const list = db.prepare(sql).all(...params)
+  res.json({ list })
+})
+
+app.get('/api/personnel/stats', (req, res) => {
+  const { user_id } = req.query
+  const total = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
+  const active = db.prepare("SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ? AND status = '在职'").get(user_id).cnt
+  const departments = db.prepare("SELECT DISTINCT department FROM personnel WHERE user_id = ? AND department != ''").all(user_id).map(r => r.department)
+  res.json({ total, active, departments })
+})
+
+app.post('/api/personnel', (req, res) => {
+  const { user_id, name, department, position, phone, entry_date, health_cert_expiry, remarks } = req.body
+  if (!name) return res.status(400).json({ message: '请填写姓名' })
+  const count = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
+  const employee_number = 'RY-' + String(count + 1).padStart(3, '0')
+  db.prepare(
+    'INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, health_cert_expiry, remarks) VALUES (?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, employee_number, name, department || '', position || '', phone || '', entry_date || '', health_cert_expiry || '', remarks || '')
+  res.json({ message: '人员添加成功' })
+})
+
+app.put('/api/personnel/:id', (req, res) => {
+  const { id } = req.params
+  const existing = db.prepare('SELECT * FROM personnel WHERE id = ? AND user_id = ?').get(id, req.body.user_id)
+  if (!existing) return res.status(404).json({ message: '人员不存在' })
+  const { name, department, position, phone, entry_date, status, health_cert_expiry, training_hours, remarks } = req.body
+  db.prepare(
+    'UPDATE personnel SET name=?, department=?, position=?, phone=?, entry_date=?, status=?, health_cert_expiry=?, training_hours=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
+  ).run(name || existing.name, department || existing.department, position || existing.position, phone || existing.phone, entry_date || existing.entry_date, status || existing.status, health_cert_expiry || existing.health_cert_expiry, training_hours ?? existing.training_hours, remarks || existing.remarks, id)
+  res.json({ message: '人员更新成功' })
+})
+
+app.delete('/api/personnel/:id', (req, res) => {
+  db.prepare('DELETE FROM personnel WHERE id = ? AND user_id = ?').run(req.params.id, req.body.user_id)
+  res.json({ message: '人员已删除' })
+})
+
+// ---- 三方管理 ----
+
+app.get('/api/third-party', (req, res) => {
+  const { user_id, keyword, vendor_type, status } = req.query
+  let sql = 'SELECT * FROM third_party WHERE user_id = ?'
+  const params = [user_id]
+  if (vendor_type) { sql += ' AND vendor_type = ?'; params.push(vendor_type) }
+  if (status) { sql += ' AND status = ?'; params.push(status) }
+  if (keyword) { sql += ' AND (vendor_name LIKE ? OR contact_person LIKE ? OR service_scope LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%', '%'+keyword+'%') }
+  sql += ' ORDER BY created_at DESC'
+  const list = db.prepare(sql).all(...params)
+  res.json({ list })
+})
+
+app.get('/api/third-party/stats', (req, res) => {
+  const { user_id } = req.query
+  const total = db.prepare('SELECT COUNT(*) AS cnt FROM third_party WHERE user_id = ?').get(user_id).cnt
+  const active = db.prepare("SELECT COUNT(*) AS cnt FROM third_party WHERE user_id = ? AND status = '合作中'").get(user_id).cnt
+  const typeCount = db.prepare("SELECT vendor_type, COUNT(*) AS cnt FROM third_party WHERE user_id = ? GROUP BY vendor_type").all(user_id)
+  res.json({ total, active, typeCount })
+})
+
+app.post('/api/third-party', (req, res) => {
+  const { user_id, vendor_name, vendor_type, contact_person, phone, address, qualification_expiry, service_scope, remarks } = req.body
+  if (!vendor_name) return res.status(400).json({ message: '请填写名称' })
+  const count = db.prepare('SELECT COUNT(*) AS cnt FROM third_party WHERE user_id = ?').get(user_id).cnt
+  const vendor_number = 'SF-' + String(count + 1).padStart(3, '0')
+  db.prepare(
+    'INSERT INTO third_party (user_id, vendor_number, vendor_name, vendor_type, contact_person, phone, address, qualification_expiry, service_scope, remarks) VALUES (?,?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, vendor_number, vendor_name, vendor_type || '检测机构', contact_person || '', phone || '', address || '', qualification_expiry || '', service_scope || '', remarks || '')
+  res.json({ message: '三方添加成功' })
+})
+
+app.put('/api/third-party/:id', (req, res) => {
+  const { id } = req.params
+  const existing = db.prepare('SELECT * FROM third_party WHERE id = ? AND user_id = ?').get(id, req.body.user_id)
+  if (!existing) return res.status(404).json({ message: '不存在' })
+  const { vendor_name, vendor_type, contact_person, phone, address, qualification_expiry, service_scope, status, remarks } = req.body
+  db.prepare(
+    'UPDATE third_party SET vendor_name=?, vendor_type=?, contact_person=?, phone=?, address=?, qualification_expiry=?, service_scope=?, status=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
+  ).run(vendor_name || existing.vendor_name, vendor_type || existing.vendor_type, contact_person || existing.contact_person, phone || existing.phone, address || existing.address, qualification_expiry || existing.qualification_expiry, service_scope || existing.service_scope, status || existing.status, remarks || existing.remarks, id)
+  res.json({ message: '更新成功' })
+})
+
+app.delete('/api/third-party/:id', (req, res) => {
+  db.prepare('DELETE FROM third_party WHERE id = ? AND user_id = ?').run(req.params.id, req.body.user_id)
+  res.json({ message: '已删除' })
+})
+
 // ---------- 远程管理接口 ----------
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'aishipan2024'
@@ -3880,6 +4068,58 @@ if (isProduction) {
   })
   console.log('📦 生产模式：已托管前端静态文件')
 }
+
+// ===== AI 智能助手对话 =====
+app.post('/api/chat', async (req, res) => {
+  const { message, history = [] } = req.body
+  if (!message) return res.status(400).json({ message: '请输入问题' })
+
+  const aiKey = process.env.AI_API_KEY
+  if (!aiKey) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 AI_API_KEY。' })
+
+  const systemPrompt = `你是"AI食安"系统的智能助手，专门为食品生产企业的质量管理人员提供帮助。
+
+系统包含以下模块：
+- 原料库与验收标准：管理原料信息、配置验收标准（证件/感官/温度）
+- 资质管理：自有资质、供应商资质、产品报告跟踪和临期预警
+- 健康证管理：员工健康证到期提醒
+- AI标签审核：上传标签图片自动审核合规性
+- 客诉管理：客诉看板、处理流程、满意度追踪
+- 体系文件：ISO 22000 / FSSC 22000 体系文件管理（管理手册、程序文件、SOP、记录表单）
+- 虫害管理：供应商、人员、化学品、服务记录
+- 培训考核：培训计划、课程、记录、考核
+- 计量校准：设备台账、校准计划、记录
+
+回答要求：
+1. 用中文回答，简洁专业
+2. 涉及食品安全问题时，引用相关GB标准
+3. 如果问题超出系统范围，建议联系食品安全顾问
+4. 回答控制在300字以内`
+
+  try {
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-10),
+      { role: 'user', content: message }
+    ]
+
+    const response = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages,
+        max_tokens: 600,
+        temperature: 0.7
+      })
+    })
+    const data = await response.json()
+    const reply = data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答，请稍后再试。'
+    res.json({ reply })
+  } catch (err) {
+    res.json({ reply: 'AI 服务暂时不可用，请稍后再试。' })
+  }
+})
 
 // 生产环境错误处理：隐藏详细堆栈信息
 app.use((err, req, res, next) => {

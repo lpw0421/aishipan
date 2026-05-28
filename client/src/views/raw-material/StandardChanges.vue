@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
-    <div class="toolbar">
-      <h2>标准变更管理</h2>
+    <div class="toolbar sub-toolbar">
+      <span></span>
       <el-button type="primary" @click="showAdd = true">发起变更</el-button>
     </div>
 
@@ -136,6 +136,7 @@ onMounted(fetchList)
 .page-container{padding:0}
 .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .toolbar h2{margin:0;color:#303133}
+.sub-toolbar{margin-top:0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
 .filter-card{margin-bottom:16px;display:flex;gap:12px;align-items:center}
 .filter-card :deep(.el-card__body){display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 </style>

@@ -1,14 +1,18 @@
 <template>
   <div class="page-container">
-    <div class="toolbar">
+    <div class="toolbar" v-if="!props.sourceType">
       <h2>不合格品管理</h2>
+      <el-button type="primary" @click="showAdd = true">记录不合格</el-button>
+    </div>
+    <div class="toolbar sub-toolbar" v-else>
+      <span></span>
       <el-button type="primary" @click="showAdd = true">记录不合格</el-button>
     </div>
 
     <!-- 搜索 -->
     <el-card class="filter-card">
       <el-input v-model="keyword" placeholder="搜索不合格编号/描述/批次" style="width:260px" clearable @change="fetchList" />
-      <el-select v-model="filterSource" placeholder="来源类型" style="width:140px" clearable @change="fetchList">
+      <el-select v-if="!props.sourceType" v-model="filterSource" placeholder="来源类型" style="width:140px" clearable @change="fetchList">
         <el-option label="原料验收" value="原料验收" /><el-option label="生产过程" value="生产过程" /><el-option label="成品检验" value="成品检验" /><el-option label="留样复检" value="留样复检" /><el-option label="客诉" value="客诉" />
       </el-select>
       <el-select v-model="filterSeverity" placeholder="严重等级" style="width:120px" clearable @change="fetchList">
@@ -24,7 +28,7 @@
     <el-card>
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="nc_number" label="不合格编号" width="140" />
-        <el-table-column prop="source_type" label="来源" width="100"><template #default="{row}"><el-tag size="small">{{ row.source_type }}</el-tag></template></el-table-column>
+        <el-table-column v-if="!props.sourceType" prop="source_type" label="来源" width="100"><template #default="{row}"><el-tag size="small">{{ row.source_type }}</el-tag></template></el-table-column>
         <el-table-column prop="related_batch" label="关联批次" width="130" />
         <el-table-column prop="nc_description" label="不合格描述" min-width="180" show-overflow-tooltip />
         <el-table-column prop="severity" label="严重等级" width="100">
@@ -48,7 +52,7 @@
     <!-- 新增/编辑对话框 -->
     <el-dialog :title="editingId ? '编辑不合格品' : '记录不合格'" v-model="showAdd" width="500px" @close="resetForm">
       <el-form :model="form" label-width="100px">
-        <el-form-item label="来源类型"><el-select v-model="form.source_type" style="width:100%"><el-option label="原料验收" value="原料验收" /><el-option label="生产过程" value="生产过程" /><el-option label="成品检验" value="成品检验" /><el-option label="留样复检" value="留样复检" /><el-option label="客诉" value="客诉" /></el-select></el-form-item>
+        <el-form-item v-if="!props.sourceType" label="来源类型"><el-select v-model="form.source_type" style="width:100%"><el-option label="原料验收" value="原料验收" /><el-option label="生产过程" value="生产过程" /><el-option label="成品检验" value="成品检验" /><el-option label="留样复检" value="留样复检" /><el-option label="客诉" value="客诉" /></el-select></el-form-item>
         <el-form-item label="关联批次"><el-input v-model="form.related_batch" /></el-form-item>
         <el-form-item label="不合格描述"><el-input v-model="form.nc_description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="严重等级"><el-radio-group v-model="form.severity"><el-radio value="轻微">轻微</el-radio><el-radio value="一般">一般</el-radio><el-radio value="严重">严重</el-radio></el-radio-group></el-form-item>
@@ -80,11 +84,15 @@ import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const props = defineProps({
+  sourceType: { type: String, default: '' }
+})
+
 const user = JSON.parse(localStorage.getItem('user') || '{}')
 const list = ref([])
 const loading = ref(false)
 const keyword = ref('')
-const filterSource = ref('')
+const filterSource = ref(props.sourceType || '')
 const filterSeverity = ref('')
 const filterStatus = ref('')
 const showAdd = ref(false)
@@ -159,6 +167,7 @@ onMounted(fetchList)
 .page-container{padding:0}
 .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .toolbar h2{margin:0;color:#303133}
+.sub-toolbar{margin-top:0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
 .filter-card{margin-bottom:16px;display:flex;gap:12px;align-items:center}
 .filter-card :deep(.el-card__body){display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 </style>

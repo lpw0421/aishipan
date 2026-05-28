@@ -178,9 +178,14 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../utils/request'
 import axios from 'axios'
 
+const props = defineProps({
+  docType: { type: String, default: '' }
+})
+
 const route = useRoute()
 
 const docType = computed(() => {
+  if (props.docType) return props.docType
   const p = route.path
   if (p.includes('/system/manual')) return 'manual'
   if (p.includes('/system/procedure')) return 'procedure'

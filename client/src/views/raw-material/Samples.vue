@@ -1,7 +1,11 @@
 <template>
   <div class="page-container">
-    <div class="toolbar">
+    <div class="toolbar" v-if="!props.sampleType">
       <h2>留样管理</h2>
+      <el-button type="primary" @click="showAdd = true">新增留样</el-button>
+    </div>
+    <div class="toolbar sub-toolbar" v-else>
+      <span></span>
       <el-button type="primary" @click="showAdd = true">新增留样</el-button>
     </div>
 
@@ -18,7 +22,7 @@
     <!-- 搜索 -->
     <el-card class="filter-card">
       <el-input v-model="keyword" placeholder="搜索样品编号/原料/产品" style="width:240px" clearable @change="fetchList" />
-      <el-select v-model="filterType" placeholder="留样类型" style="width:140px" clearable @change="fetchList">
+      <el-select v-if="!props.sampleType" v-model="filterType" placeholder="留样类型" style="width:140px" clearable @change="fetchList">
         <el-option label="原料留样" value="原料留样" /><el-option label="成品留样" value="成品留样" /><el-option label="半成品留样" value="半成品留样" />
       </el-select>
       <el-select v-model="filterStatus" placeholder="状态" style="width:120px" clearable @change="fetchList">
@@ -31,7 +35,7 @@
     <el-card>
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="sample_number" label="样品编号" width="140" />
-        <el-table-column prop="sample_type" label="留样类型" width="100"><template #default="{row}"><el-tag size="small">{{ row.sample_type }}</el-tag></template></el-table-column>
+        <el-table-column v-if="!props.sampleType" prop="sample_type" label="留样类型" width="100"><template #default="{row}"><el-tag size="small">{{ row.sample_type }}</el-tag></template></el-table-column>
         <el-table-column prop="material_product_name" label="原料/产品名称" min-width="130" />
         <el-table-column prop="related_batch" label="关联批次" width="130" />
         <el-table-column prop="sample_quantity" label="留样数量" width="90" />
@@ -61,7 +65,7 @@
         <el-form-item label="原料/产品名称"><el-input v-model="form.material_product_name" /></el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="留样类型"><el-select v-model="form.sample_type" style="width:100%"><el-option label="原料留样" value="原料留样" /><el-option label="成品留样" value="成品留样" /><el-option label="半成品留样" value="半成品留样" /></el-select></el-form-item>
+            <el-form-item v-if="!props.sampleType" label="留样类型"><el-select v-model="form.sample_type" style="width:100%"><el-option label="原料留样" value="原料留样" /><el-option label="成品留样" value="成品留样" /><el-option label="半成品留样" value="半成品留样" /></el-select></el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="关联批次"><el-input v-model="form.related_batch" /></el-form-item>
@@ -112,11 +116,15 @@ import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+const props = defineProps({
+  sampleType: { type: String, default: '' }
+})
+
 const user = JSON.parse(localStorage.getItem('user') || '{}')
 const list = ref([])
 const loading = ref(false)
 const keyword = ref('')
-const filterType = ref('')
+const filterType = ref(props.sampleType || '')
 const filterStatus = ref('')
 const showAdd = ref(false)
 const showDispose = ref(false)
@@ -211,6 +219,7 @@ onMounted(() => { fetchList(); fetchStats() })
 .page-container{padding:0}
 .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .toolbar h2{margin:0;color:#303133}
+.sub-toolbar{margin-top:0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
 .stats-row{margin-bottom:16px}
 .stat-card{text-align:center}
 .stat-value{font-size:28px;font-weight:700}

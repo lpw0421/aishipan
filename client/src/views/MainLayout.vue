@@ -23,63 +23,44 @@
         <el-sub-menu index="/raw-material">
           <template #title>
             <el-icon><Box /></el-icon>
-            <span>原料与标准</span>
+            <span>物料管理</span>
           </template>
           <el-menu-item index="/raw-material/library">
-            <span>原料库</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/standards">
-            <span>验收标准</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/inspection">
-            <span>原料验收</span>
+            <span>原料管理</span>
           </el-menu-item>
           <el-menu-item index="/raw-material/product-standards">
-            <span>产品标准</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/test-items">
-            <span>检验项目</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/samples">
-            <span>留样管理</span>
+            <span>产品管理</span>
           </el-menu-item>
           <el-menu-item index="/raw-material/traceability">
             <span>批次追溯</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/non-conforming">
-            <span>不合格品</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/standard-changes">
-            <span>标准变更</span>
-          </el-menu-item>
-          <el-menu-item index="/raw-material/supplier-quality">
-            <span>供应商质量评估</span>
           </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="/credentials">
           <template #title>
             <el-icon><Document /></el-icon>
-            <span>资质管理</span>
+            <span>供方管理</span>
           </template>
-          <el-menu-item index="/credentials/own">
-            <span>自有资质</span>
-          </el-menu-item>
           <el-menu-item index="/credentials/supplier">
-            <span>供应商资质</span>
+            <span>资质管理</span>
           </el-menu-item>
-          <el-menu-item index="/credentials/product-reports">
-            <span>产品报告</span>
-          </el-menu-item>
-          <el-menu-item index="/credentials/overview">
-            <span>资质总览</span>
+          <el-menu-item index="/credentials/supplier-quality">
+            <span>质量评估</span>
           </el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item index="/health-certs">
-          <el-icon><FirstAidKit /></el-icon>
-          <span>健康证管理</span>
-        </el-menu-item>
+        <el-sub-menu index="/personnel">
+          <template #title>
+            <el-icon><User /></el-icon>
+            <span>人员管理</span>
+          </template>
+          <el-menu-item index="/personnel/info">
+            <span>人员综合</span>
+          </el-menu-item>
+          <el-menu-item index="/training">
+            <span>培训考核</span>
+          </el-menu-item>
+        </el-sub-menu>
 
         <el-sub-menu index="/ai">
           <template #title>
@@ -108,136 +89,23 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="/complaint">
-          <template #title>
-            <el-icon><WarningFilled /></el-icon>
-            <span>客诉管理</span>
-          </template>
-          <el-menu-item index="/complaint/dashboard">
-            <el-icon><TrendCharts /></el-icon>
-            <span>客诉看板</span>
-          </el-menu-item>
-          <el-menu-item index="/complaint/list">
-            <el-icon><List /></el-icon>
-            <span>客诉列表</span>
-          </el-menu-item>
-          <el-menu-item index="/complaint/handle">
-            <el-icon><EditPen /></el-icon>
-            <span>客诉处理</span>
-          </el-menu-item>
-          <el-menu-item index="/complaint/satisfaction">
-            <el-icon><Medal /></el-icon>
-            <span>满意度追踪</span>
-          </el-menu-item>
-        </el-sub-menu>
+        <el-menu-item index="/system">
+          <el-icon><Folder /></el-icon>
+          <span>体系文件</span>
+        </el-menu-item>
 
-        <el-sub-menu index="/system">
+        <el-sub-menu index="/third-party">
           <template #title>
-            <el-icon><Folder /></el-icon>
-            <span>体系文件</span>
+            <el-icon><Connection /></el-icon>
+            <span>三方管理</span>
           </template>
-          <el-menu-item index="/system/architecture">
-            <span>体系架构</span>
-          </el-menu-item>
-          <el-menu-item index="/system/manual">
-            <span>管理手册</span>
-          </el-menu-item>
-          <el-menu-item index="/system/procedure">
-            <span>程序文件</span>
-          </el-menu-item>
-          <el-menu-item index="/system/sop">
-            <span>作业指导书</span>
-          </el-menu-item>
-          <el-menu-item index="/system/form">
-            <span>记录表单</span>
-          </el-menu-item>
-          <el-menu-item index="/system/external">
-            <span>外部文件</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="/pest">
-          <template #title>
+          <el-menu-item index="/third-party/pest">
             <el-icon><Platform /></el-icon>
             <span>虫害管理</span>
-          </template>
-          <el-menu-item index="/pest/supplier">
-            <el-icon><Files /></el-icon>
-            <span>供应商资质</span>
           </el-menu-item>
-          <el-menu-item index="/pest/staff">
-            <el-icon><User /></el-icon>
-            <span>人员管理</span>
-          </el-menu-item>
-          <el-menu-item index="/pest/chemicals">
-            <el-icon><Box /></el-icon>
-            <span>化学品管理</span>
-          </el-menu-item>
-          <el-menu-item index="/pest/service-records">
-            <el-icon><Notebook /></el-icon>
-            <span>服务记录</span>
-          </el-menu-item>
-          <el-menu-item index="/pest/service-reports">
-            <el-icon><DocumentChecked /></el-icon>
-            <span>服务报告</span>
-          </el-menu-item>
-          <el-menu-item index="/pest/complaints">
-            <el-icon><WarningFilled /></el-icon>
-            <span>投诉整改</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="/training">
-          <template #title>
-            <el-icon><School /></el-icon>
-            <span>培训考核</span>
-          </template>
-          <el-menu-item index="/training/plans">
-            <el-icon><Calendar /></el-icon>
-            <span>培训计划</span>
-          </el-menu-item>
-          <el-menu-item index="/training/courses">
-            <el-icon><Reading /></el-icon>
-            <span>培训课程</span>
-          </el-menu-item>
-          <el-menu-item index="/training/records">
-            <el-icon><Notebook /></el-icon>
-            <span>培训记录</span>
-          </el-menu-item>
-          <el-menu-item index="/training/exams">
-            <el-icon><EditPen /></el-icon>
-            <span>考核管理</span>
-          </el-menu-item>
-          <el-menu-item index="/training/certs">
-            <el-icon><Medal /></el-icon>
-            <span>证书管理</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="/calibration">
-          <template #title>
+          <el-menu-item index="/third-party/calibration">
             <el-icon><Clock /></el-icon>
             <span>计量校准</span>
-          </template>
-          <el-menu-item index="/calibration/devices">
-            <el-icon><Platform /></el-icon>
-            <span>设备台账</span>
-          </el-menu-item>
-          <el-menu-item index="/calibration/plans">
-            <el-icon><Calendar /></el-icon>
-            <span>校准计划</span>
-          </el-menu-item>
-          <el-menu-item index="/calibration/records">
-            <el-icon><Tickets /></el-icon>
-            <span>校准记录</span>
-          </el-menu-item>
-          <el-menu-item index="/calibration/agencies">
-            <el-icon><OfficeBuilding /></el-icon>
-            <span>校准机构</span>
-          </el-menu-item>
-          <el-menu-item index="/calibration/exceptions">
-            <el-icon><CircleClose /></el-icon>
-            <span>异常处理</span>
           </el-menu-item>
         </el-sub-menu>
       </el-menu>
@@ -306,12 +174,16 @@
       </el-main>
     </el-container>
   </el-container>
+
+  <!-- 智能助手 -->
+  <ChatBot />
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import request from '../utils/request'
+import ChatBot from './ChatBot.vue'
 import {
   HomeFilled,
   Document,
@@ -342,7 +214,8 @@ import {
   ChatDotSquare,
   TrendCharts,
   CollectionTag,
-  Search
+  Search,
+  Connection
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

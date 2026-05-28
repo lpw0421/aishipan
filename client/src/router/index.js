@@ -15,15 +15,16 @@ const routes = [
       { path: 'dashboard', component: () => import('../views/Dashboard.vue') },
       {
         path: 'credentials',
-        redirect: '/credentials/own',
+        redirect: '/credentials/supplier',
         children: [
-          { path: 'own', component: () => import('../views/Credentials.vue') },
+          { path: 'own', redirect: '/credentials/supplier' },
           { path: 'supplier', component: () => import('../views/Credentials.vue') },
           { path: 'product-reports', component: () => import('../views/credentials/ProductReports.vue') },
-          { path: 'overview', component: () => import('../views/credentials/Overview.vue') }
+          { path: 'overview', component: () => import('../views/credentials/Overview.vue') },
+          { path: 'supplier-quality', component: () => import('../views/raw-material/SupplierQuality.vue') }
         ]
       },
-      { path: 'health-certs', component: () => import('../views/HealthCerts.vue') },
+      { path: 'health-certs', redirect: '/personnel/health-certs' },
       { path: 'label-audit', redirect: '/ai/smart' },
       {
         path: 'ai',
@@ -47,47 +48,48 @@ const routes = [
       },
       {
         path: 'system',
-        redirect: '/system/architecture',
+        redirect: '/system',
         children: [
-          { path: 'architecture', component: () => import('../views/system/Architecture.vue') },
-          { path: 'manual', component: () => import('../views/system/SystemDocs.vue') },
-          { path: 'procedure', component: () => import('../views/system/SystemDocs.vue') },
-          { path: 'sop', component: () => import('../views/system/SystemDocs.vue') },
-          { path: 'form', component: () => import('../views/system/SystemDocs.vue') },
-          { path: 'external', component: () => import('../views/system/SystemDocs.vue') }
+          { path: '', component: () => import('../views/system/SystemWrapper.vue') },
+          { path: 'architecture', redirect: '/system' },
+          { path: 'manual', redirect: '/system' },
+          { path: 'procedure', redirect: '/system' },
+          { path: 'sop', redirect: '/system' },
+          { path: 'form', redirect: '/system' },
+          { path: 'external', redirect: '/system' }
         ]
       },
       {
         path: 'pest',
-        redirect: '/pest/supplier',
+        redirect: '/third-party/pest',
         children: [
-          { path: 'supplier', component: () => import('../views/pest/Supplier.vue') },
-          { path: 'staff', component: () => import('../views/pest/Staff.vue') },
-          { path: 'chemicals', component: () => import('../views/pest/Chemicals.vue') },
-          { path: 'service-records', component: () => import('../views/pest/ServiceRecords.vue') },
-          { path: 'service-reports', component: () => import('../views/pest/ServiceReports.vue') },
-          { path: 'complaints', component: () => import('../views/pest/Complaints.vue') }
+          { path: 'supplier', redirect: '/third-party/pest' },
+          { path: 'staff', redirect: '/third-party/pest' },
+          { path: 'chemicals', redirect: '/third-party/pest' },
+          { path: 'service-records', redirect: '/third-party/pest' },
+          { path: 'service-reports', redirect: '/third-party/pest' },
+          { path: 'complaints', redirect: '/third-party/pest' }
         ]
       },
       {
         path: 'calibration',
-        redirect: '/calibration/devices',
+        redirect: '/third-party/calibration',
         children: [
-          { path: 'devices', component: () => import('../views/calibration/Devices.vue') },
-          { path: 'plans', component: () => import('../views/calibration/Plans.vue') },
-          { path: 'records', component: () => import('../views/calibration/Records.vue') },
-          { path: 'agencies', component: () => import('../views/calibration/Agencies.vue') },
-          { path: 'exceptions', component: () => import('../views/calibration/Exceptions.vue') }
+          { path: 'devices', redirect: '/third-party/calibration' },
+          { path: 'plans', redirect: '/third-party/calibration' },
+          { path: 'records', redirect: '/third-party/calibration' },
+          { path: 'agencies', redirect: '/third-party/calibration' },
+          { path: 'exceptions', redirect: '/third-party/calibration' }
         ]
       },
       {
         path: 'complaint',
-        redirect: '/complaint/dashboard',
+        redirect: '/raw-material/product-standards',
         children: [
-          { path: 'dashboard', component: () => import('../views/complaint/Dashboard.vue') },
-          { path: 'list', component: () => import('../views/complaint/List.vue') },
-          { path: 'handle', component: () => import('../views/complaint/Handle.vue') },
-          { path: 'satisfaction', component: () => import('../views/complaint/Satisfaction.vue') }
+          { path: 'dashboard', redirect: '/raw-material/product-standards' },
+          { path: 'list', redirect: '/raw-material/product-standards' },
+          { path: 'handle', redirect: '/raw-material/product-standards' },
+          { path: 'satisfaction', redirect: '/raw-material/product-standards' }
         ]
       },
       {
@@ -95,26 +97,36 @@ const routes = [
         redirect: '/raw-material/library',
         children: [
           { path: 'library', component: () => import('../views/raw-material/Library.vue') },
-          { path: 'standards', component: () => import('../views/raw-material/InspectionStandards.vue') },
-          { path: 'inspection', component: () => import('../views/raw-material/Inspection.vue') },
+          { path: 'inspection', redirect: '/raw-material/library' },
           { path: 'product-standards', component: () => import('../views/raw-material/ProductStandards.vue') },
-          { path: 'test-items', component: () => import('../views/raw-material/TestItems.vue') },
-          { path: 'samples', component: () => import('../views/raw-material/Samples.vue') },
+          { path: 'samples', redirect: '/raw-material/library' },
           { path: 'traceability', component: () => import('../views/raw-material/Traceability.vue') },
-          { path: 'non-conforming', component: () => import('../views/raw-material/NonConforming.vue') },
-          { path: 'standard-changes', component: () => import('../views/raw-material/StandardChanges.vue') },
-          { path: 'supplier-quality', component: () => import('../views/raw-material/SupplierQuality.vue') }
+          { path: 'non-conforming', redirect: '/raw-material/library' },
+          { path: 'standard-changes', redirect: '/raw-material/library' },
+          { path: 'supplier-quality', redirect: '/credentials/supplier-quality' }
         ]
       },
       {
-        path: 'training',
-        redirect: '/training/plans',
+        path: 'third-party',
+        redirect: '/third-party/pest',
         children: [
-          { path: 'plans', component: () => import('../views/training/Plans.vue') },
-          { path: 'courses', component: () => import('../views/training/Courses.vue') },
-          { path: 'records', component: () => import('../views/training/Records.vue') },
-          { path: 'exams', component: () => import('../views/training/Exams.vue') },
-          { path: 'certs', component: () => import('../views/training/Certs.vue') }
+          { path: 'pest', component: () => import('../views/pest/PestWrapper.vue') },
+          { path: 'calibration', component: () => import('../views/calibration/CalibrationWrapper.vue') }
+        ]
+      },
+      { path: 'training', component: () => import('../views/training/TrainingWrapper.vue') },
+      { path: 'training/plans', redirect: '/training' },
+      { path: 'training/courses', redirect: '/training' },
+      { path: 'training/records', redirect: '/training' },
+      { path: 'training/exams', redirect: '/training' },
+      { path: 'training/certs', redirect: '/training' },
+      {
+        path: 'personnel',
+        redirect: '/personnel/info',
+        children: [
+          { path: 'info', component: () => import('../views/hr/PersonnelWrapper.vue') },
+          { path: 'list', redirect: '/personnel/info' },
+          { path: 'health-certs', redirect: '/personnel/info' }
         ]
       }
     ]
