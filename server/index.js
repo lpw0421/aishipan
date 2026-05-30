@@ -1853,10 +1853,11 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     `${company_name} 抽检不合格 食品`
   ]
 
-  for (const query of searchQueries) {
+  // 并行搜索（三类搜索同时进行）
+  const searchTasks = searchQueries.map(async (query) => {
     for (const engine of searchEngines) {
       try {
-        const opts = { signal: AbortSignal.timeout(8000) }
+        const opts = { signal: AbortSignal.timeout(6000) }
         if (engine.headers) opts.headers = engine.headers
         const res = await fetch(engine.url(query), opts)
         if (res.ok) {
@@ -1864,16 +1865,18 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
           const results = engine.parse(html)
           const items = Array.isArray(results) ? results : (results.snippets || [])
           if (items.length > 0) {
-            webInfo += `\n### ${engine.name}: "${query}"\n`
-            items.forEach(s => { webInfo += `- ${s}\n` })
+            let info = `\n### ${engine.name}: "${query}"\n`
+            items.forEach(s => { info += `- ${s}\n` })
+            return info
           }
-          break // 成功就跳出引擎循环
         }
-      } catch (e) {
-        // 引擎不可用，尝试下一个
-      }
+      } catch (e) { /* 尝试下一个引擎 */ }
     }
-  }
+    return ''
+  })
+
+  const searchResults = await Promise.all(searchTasks)
+  webInfo = searchResults.filter(Boolean).join('')
 
   if (webInfo) {
     webInfo = '\n## 🌐 联网实时搜索结果（以下为实时搜索到的公开信息）\n' + webInfo +
