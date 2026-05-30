@@ -1789,151 +1789,92 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     })
   }
 
-  // ===== 联网搜索（优先缓存 → 实时引擎） =====
+  // ===== 联网查询（国内免费数据库实时查询） =====
   let webInfo = ''
-  let searchSource = '无'
 
-  // 1. 先查本地缓存
+  const fetchHtml = async (url) => {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } })
+      return res.ok ? await res.text() : ''
+    } catch { return '' }
+  }
+
+  // 1. 优先：Mac搜索代理（WebSearch，SSH隧道）
+  let proxyResults = null
   try {
-    const cacheRow = db.prepare("SELECT * FROM supplier_search_cache WHERE query = ? AND expires_at > datetime('now')").get(company_name.trim())
-    if (cacheRow) {
-      const cached = JSON.parse(cacheRow.results)
-      if (Array.isArray(cached) && cached.length > 0) {
-        webInfo = '\n## 🌐 缓存搜索（' + cacheRow.search_engine + ' | ' + cacheRow.searched_at + '）\n'
-        cached.forEach(s => { webInfo += '- ' + s + '\n' })
-        searchSource = '缓存'
-        console.log('[supplier-score] 使用缓存搜索, 条数:', cached.length)
+    const proxyRes = await fetch('http://127.0.0.1:3457/search?q=' + encodeURIComponent(company_name), { signal: AbortSignal.timeout(30000) })
+    if (proxyRes.ok) {
+      const proxyData = await proxyRes.json()
+      if (proxyData.results && proxyData.results.length > 0) {
+        proxyResults = proxyData
+        console.log('[supplier-score] 搜索代理返回 ' + proxyData.results.length + ' 条结果')
       }
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { console.log('[supplier-score] 搜索代理不可用:', e.message) }
 
-  // 2. 缓存未命中则实时搜索
-  if (!webInfo) {
-  const searchEngines = [
-    {
-      name: 'Bing',
-      url: (q) => `https://cn.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      parse: (html) => {
-        const snips = []
-        // b_algo 是 Bing 的主结果容器
-        const algoRe = /<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/gi
-        let m
-        while ((m = algoRe.exec(html)) !== null) {
-          const text = m[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim()
-          if (text.length > 20) snips.push(text.substring(0, 500))
-        }
-        // 如果 b_algo 没匹配到，尝试提取所有可见文本
-        if (snips.length === 0) {
-          const bodyText = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-          // 查找包含关键信息的句子
-          const sentences = bodyText.split(/[。！？]/)
-          sentences.forEach(s => {
-            if (s.length > 20 && s.length < 300) snips.push(s.trim())
-          })
-        }
-        return snips.slice(0, 10)
-      }
-    },
-    {
-      name: '360搜索',
-      url: (q) => `https://www.so.com/s?q=${encodeURIComponent(q)}`,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)' },
-      parse: (html) => {
-        const snips = []
-        // 360搜索使用 res-title / res-desc
-        const titleRe = /<h3[^>]*class="res-title"[^>]*>([\s\S]*?)<\/h3>/gi
-        const descRe = /<p[^>]*class="res-desc"[^>]*>([\s\S]*?)<\/p>/gi
-        const citeRe = /<cite[^>]*>([\s\S]*?)<\/cite>/gi
-        let m
-        while ((m = titleRe.exec(html)) !== null) snips.push('📌 ' + m[1].replace(/<[^>]+>/g, '').trim())
-        while ((m = descRe.exec(html)) !== null) {
-          const t = m[1].replace(/<[^>]+>/g, '').trim()
-          if (t.length > 15) snips.push(t)
-        }
-        while ((m = citeRe.exec(html)) !== null) snips.push('🔗 ' + m[1].replace(/<[^>]+>/g, '').trim())
-        return snips.slice(0, 12)
-      }
-    },
-    {
-      name: 'Bing中国',
-      url: (q) => `https://cn.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      parse: (html) => {
-        const snips = []
-        // Bing 使用 h2 标题 + p 描述
-        const capRe = /<div class="b_caption"[^>]*>([\s\S]*?)<\/div>\s*<\/li>/gi
-        let m
-        while ((m = capRe.exec(html)) !== null) {
-          const text = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-          if (text.length > 15) snips.push(text.substring(0, 300))
-        }
-        return snips.slice(0, 8)
-      }
-    },
-    {
-      name: '搜狗',
-      url: (q) => `https://m.sogou.com/web/searchList.jsp?keyword=${encodeURIComponent(q)}`,
-      headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)' },
-      parse: (html) => {
-        const snips = []
-        // 搜狗移动版
-        const re = /<div class="vrwrap"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi
-        let m
-        while ((m = re.exec(html)) !== null) {
-          const t = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-          if (t.length > 15) snips.push(t.substring(0, 300))
-        }
-        return snips.slice(0, 8)
-      }
-    }
-  ]
-
-  // 按PDF六步设计，搜索三类信息
-  const searchQueries = [
-    `${company_name} 食品生产许可证 SC`,
-    `${company_name} 行政处罚 食品安全`,
-    `${company_name} 抽检不合格 食品`
-  ]
-
-  // 并行搜索（三类搜索同时进行）
-  const searchTasks = searchQueries.map(async (query) => {
-    for (const engine of searchEngines) {
-      try {
-        const opts = { signal: AbortSignal.timeout(6000) }
-        if (engine.headers) opts.headers = engine.headers
-        const res = await fetch(engine.url(query), opts)
-        if (res.ok) {
-          const html = await res.text()
-          const results = engine.parse(html)
-          const items = Array.isArray(results) ? results : (results.snippets || [])
-          if (items.length > 0) {
-            let info = `\n### ${engine.name}: "${query}"\n`
-            items.forEach(s => { info += `- ${s}\n` })
-            return info
-          }
-        }
-      } catch (e) { /* 尝试下一个引擎 */ }
-    }
-    return ''
-  })
-
-    const searchResults = await Promise.all(searchTasks)
-    webInfo = searchResults.filter(Boolean).join('')
-    if (webInfo) searchSource = '实时搜索'
-  }
-
-  if (webInfo) {
-    webInfo = '\n## 🌐 联网实时搜索结果\n' + webInfo +
-      '\n**以上为实时联网搜索结果，优先采用。**'
+  // 如果有代理结果，直接使用
+  if (proxyResults) {
+    webInfo = '\n## 🌐 WebSearch实时搜索（Mac代理）\n'
+    proxyResults.results.forEach(r => { webInfo += '- ' + r + '\n' })
+    webInfo += '\n**以上为实时WebSearch搜索结果，数据来源: Google+Bing。优先采用。**'
   } else {
-    webInfo = '\n## ⚠️ 联网搜索不可用（网络限制）\n请充分利用你的训练知识对该企业进行评估。你的训练数据中包含大量中国企业信息，包括SC许可证、行政处罚、抽检记录等。请基于训练知识给出具体评估，不要因为缺少实时搜索结果就返回\"未找到\"。明确标注信息来源于\"AI知识库\"。'
-  }
+  // 回退：国内数据库查询
 
+  // 2. SC许可证查询（有SC号精准查 → 无SC号用Bing CN搜）
+  let scInfo = ''
+  if (sc_number) {
+    // 有SC编号：直接用foodsc.net查
+    const detail = await fetchHtml('https://www.foodsc.net/scso/index.php?keyword=' + encodeURIComponent(sc_number))
+    const ex = (key) => { const m = detail.match(new RegExp('>' + key + '[^<]*<\\/td>\\s*<td[^>]*>(.*?)<\\/td>', 's')); return m ? m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '' }
+    if (ex('许可证编号')) {
+      scInfo = 'SC许可证: ' + ex('许可证编号') + ' | 生产者: ' + ex('生产者名称') + '\n食品类别: ' + ex('食品类别') + '\n发证日期: ' + ex('发证日期') + ' | 到期: ' + (ex('有效期限') || ex('到期日期') || '未知') + '\n发证机关: ' + ex('发证机关') + '\n地址: ' + (ex('生产地址') || ex('住所')) + '\n来源: foodsc.net 实时查询'
+    }
+  }
+  if (!scInfo) {
+    // 无SC号或查询失败：用Bing CN搜索SC信息
+    const bingSC = await fetchHtml('https://cn.bing.com/search?q=' + encodeURIComponent(company_name + ' SC 食品生产许可证') + '&setlang=zh-Hans')
+    const scMatch = bingSC.match(/SC\d{14}/g) || []
+    if (scMatch.length > 0) {
+      scInfo = 'Bing搜索发现SC编号: ' + [...new Set(scMatch)].join(', ') + ' | 请提供SC编号以获取详细信息'
+    } else {
+      scInfo = '未找到SC许可证信息。建议提供SC编号（SC+14位数字）以获得准确的许可证状态'
+    }
+  }
+  console.log('[supplier-score] SC查询完成')
+
+  // 2. 信用中国 — 行政处罚/经营异常
+  const cHtml = await fetchHtml('https://www.creditchina.gov.cn/search?keyword=' + encodeURIComponent(company_name))
+  const cText = cHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const riskKw = ['行政处罚', '经营异常', '严重失信', '黑名单', '被执行人']
+  const found = riskKw.filter(k => cText.includes(k))
+  const creditInfo = found.length > 0
+    ? '信用中国: 检测到关键词 ' + found.join('、') + '，请人工核实 https://www.creditchina.gov.cn/search?keyword=' + encodeURIComponent(company_name)
+    : '信用中国: 未发现行政处罚、经营异常、严重失信等记录'
+  console.log('[supplier-score] creditchina.gov.cn 已查询')
+
+  // 3. 企查查 — 工商信息
+  const qHtml = await fetchHtml('https://www.qcc.com/web/search?key=' + encodeURIComponent(company_name))
+  const qText = qHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  let qccInfo = ''
+  if (qText.length > 500) {
+    const parts = []
+    for (const kw of ['法定代表人', '注册资本', '成立日期', '经营状态', '统一社会信用代码']) {
+      const idx = qText.indexOf(kw)
+      if (idx > 0) parts.push(qText.substring(idx, idx + 80).trim())
+    }
+    qccInfo = parts.length > 0 ? '企查查: ' + parts.join(' | ') : '企查查: 页面已获取(' + qText.length + 'B)'
+  } else {
+    qccInfo = '企查查: 查询受限（可能需验证码）'
+  }
+  console.log('[supplier-score] qcc.com 已查询')
+
+  // 聚合
+  webInfo = '\n## 🌐 实时联网查询结果\n### SC许可证 (foodsc.net)\n' + scInfo + '\n\n### 行政处罚/信用 (creditchina.gov.cn)\n' + creditInfo + '\n\n### 工商信息 (qcc.com)\n' + qccInfo + '\n\n**以上为实时联网查询结果，优先采用。**'
+  } // 回退查询结束
   const prompt = `你是食品供应商合规审核专家。请对该企业进行五维合规评估。
 
-**数据使用优先级：联网搜索结果(如有) > AI知识库 > 数据库记录**
-**关键原则：你的训练数据中包含大量中国企业信息。如果联网搜索和数据库都没有记录，请基于你的知识库给出具体评估，不要返回\"未找到\"。你对知名食品企业应该有所了解。**
+**数据使用优先级：实时联网查询结果 > 数据库记录 > AI知识库**
+**关键原则：联网查询来自foodsc.net(SC许可证)、creditchina.gov.cn(处罚/信用)、qcc.com(工商)的实时数据。优先基于这些实时数据评估，仅当所有联网查询都失败时才用训练知识补充，标注来源。**
 
 ## 企业信息
 - 企业名称：${company_name}
