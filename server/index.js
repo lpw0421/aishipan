@@ -1779,7 +1779,7 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     report_count: productReports.length, qualified_reports: qualifiedReports
   }
 
-  // Step 2-5: AI 综合分析（资质核验+处罚+抽检+经营异常+食安管控 五维评分）
+  // Step 2-5: 联网搜索 + AI 综合分析
   const aiKey = process.env.AI_API_KEY
   if (!aiKey) {
     return res.json({
@@ -1789,44 +1789,55 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     })
   }
 
-  const prompt = `你是食品供应商合规审核专家。请基于以下数据对该供应商进行五维合规评估。
+  // 尝试联网搜索企业公开信息
+  let webInfo = ''
+  try {
+    const searchQuery = encodeURIComponent(company_name + ' 食品生产许可证 行政处罚')
+    const searchRes = await fetch('https://www.google.com/search?q=' + searchQuery, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(5000)
+    })
+    if (searchRes.ok) {
+      const html = await searchRes.text()
+      // 简单提取文本摘要
+      const snippets = html.match(/<span[^>]*>[^<]*公司[^<]*食品[^<]*<\/span>/gi) || []
+      webInfo = '\n\n## 联网搜索结果摘要\n' + snippets.slice(0, 10).map(s => '- ' + s.replace(/<[^>]+>/g, '')).join('\n')
+    }
+  } catch (e) {
+    // 搜索失败不影响主流程
+    console.log('[supplier-score] 联网搜索未获取到结果:', e.message)
+  }
 
-## 供应商数据
+  const prompt = `你是食品供应商合规审核专家。请对该企业进行五维合规评估。
+
+## 企业信息
 - 企业名称：${company_name}
 - SC许可证编号：${sc_number || '未提供'}
 - 统一社会信用代码：${credit_code || '未提供'}
 - 注册地址：${address || '未提供'}
+
+## 系统数据库记录
 - 证照清单：${JSON.stringify(certStatuses.map(c => ({名称:c.name, 状态:c.status, 到期日:c.expiry_date, 类型:c.category})))}
 - 产品报告：${JSON.stringify(productReports.map(r => ({产品:r.product_name, 类型:r.report_type, 结论:r.conclusion, 检测日期:r.test_date})))}
+${webInfo}
+## 评分要求
+**重要：你应该充分利用训练数据中关于该企业的知识进行评估！** 如果数据库记录不完整，使用你的知识库补充判断，但需标明信息来源。
 
-## 评估维度（严格按以下5维，不得增减）
-1. 资质合规性：证照是否齐全有效、是否三证一致、是否存在过期/临期
-2. 行政处罚：基于企业名称判断是否有已知的食品安全行政处罚（注明信息局限性）
-3. 产品抽检：基于产品报告结论分析抽检合格率，识别不合格项
-4. 经营异常：判断是否存在经营异常风险（如证照大量过期=经营异常信号）
-5. 食安管控：基于证照管理规范性、产品报告完整性评估食安体系有效性
+## 评估维度（5维，不可增减）
+1. 资质合规性(权重25)：证照齐全性、有效性、SC许可证状态。如该企业为知名企业且有SC编号，基于行业知识评估
+2. 行政处罚(权重25)：基于训练知识判断是否有公开的食品安全处罚记录，标注"训练知识/待核实"
+3. 产品抽检(权重25)：分析产品报告结论。如无记录，基于行业知识评估该品类常见抽检风险
+4. 经营异常(权重15)：证照大量过期=异常信号；基于训练知识判断企业工商状态
+5. 食安管控(权重10)：证照管理规范性、体系认证情况
 
-## 评分规则（非常重要）
-- 每个维度打0-100分，分数越高=合规越好
-- 综合分 = 资质*0.25 + 处罚*0.25 + 抽检*0.25 + 异常*0.15 + 管控*0.10
-- 等级判定：>=75低风险，60-74中风险，<60高风险
-- 任一维度<60 → 最高综合为中风险
+## 评分规则
+- 每维0-100分，分数越高=合规越好（不是风险越高！）
+- 综合分 = 各维度分数×权重之和/100
+- >=75低风险，60-74中风险，<60高风险
+- 数据不足时基于训练知识合理推断，但维度分数不超过70且标注"待核实"
 
-## 返回JSON格式
-{
-  "total_score": 数字(0-100),
-  "level": "低风险|中风险|高风险",
-  "summary": "综合评估摘要（2-3句话）",
-  "dimensions": [
-    {"name":"资质合规性","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":["发现1"],"suggestion":"建议"},
-    {"name":"行政处罚","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
-    {"name":"产品抽检","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
-    {"name":"经营异常","score":数字(0-100),"weight":15,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
-    {"name":"食安管控","score":数字(0-100),"weight":10,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"}
-  ],
-  "risk_tips": ["风险提示"],
-  "disclaimer": "本报告基于系统数据库记录和AI分析生成。行政处罚、经营异常等信息因未经在线实时核验，可能存在遗漏，建议人工补充核实。"
-}`
+## JSON格式
+{"total_score":0-100,"level":"低风险|中风险|高风险","summary":"综合摘要","dimensions":[{"name":"资质合规性","score":0-100,"weight":25,"level":"低风险|中风险|高风险","findings":["发现"],"source":"数据库|训练知识|联网搜索","suggestion":"建议"},...],"risk_tips":["风险提示"],"disclaimer":"免责声明"}`
 
   const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
     method: 'POST',
