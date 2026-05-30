@@ -1745,50 +1745,112 @@ app.post('/api/ai-audit/ingredients', strictLimiter, async (req, res) => {
 })
 
 // ===== AI 供应商评分 =====
+// ===== AI 供应商合规审核（按PDF六步逻辑） =====
 app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
-  const { user_id, company_name } = req.body
-  if (!user_id || !company_name) return res.status(400).json({ message: '请提供供应商名称' })
+  try {
+  const { user_id, company_name, sc_number, credit_code, address } = req.body
+  if (!user_id || !company_name) return res.status(400).json({ message: '请提供公司名称' })
 
-  // 汇总该供应商的相关数据
-  const certs = db.prepare("SELECT name, expiry_date, is_permanent FROM certificates WHERE user_id = ? AND company_name = ?").all(user_id, company_name)
-  const productReports = db.prepare("SELECT product_name, conclusion, expiry_date FROM product_reports WHERE user_id = ?").all(user_id)
-  // 简单匹配：报告产品名可能与供应商相关联
-  const reportsForSupplier = productReports.filter(r => {
-    // 尝试匹配产品报告与供应商（通过产品名模糊匹配或直接关联）
-    return true  // 实际应用中应有更精确的关联
-  })
+  // Step 1: 从数据库提取供应商信息
+  const certs = db.prepare("SELECT name, expiry_date, is_permanent, category, file_paths FROM certificates WHERE user_id = ? AND company_name = ?").all(user_id, company_name)
+  const productReports = db.prepare("SELECT product_name, report_type, test_date, expiry_date, conclusion, unqualified_items FROM product_reports WHERE user_id = ?").all(user_id)
 
-  const certStatuses = certs.map(c => {
-    const status = getStatus(c.expiry_date, c.is_permanent)
-    return { name: c.name, expiry_date: c.expiry_date, is_permanent: !!c.is_permanent, status }
-  })
+  const certStatuses = certs.map(c => ({
+    name: c.name, expiry_date: c.expiry_date,
+    is_permanent: !!c.is_permanent, category: c.category,
+    status: getStatus(c.expiry_date, c.is_permanent)
+  }))
+
+  const validCerts = certStatuses.filter(c => c.status === 'valid').length
+  const expiringCerts = certStatuses.filter(c => c.status === 'expiring_soon').length
+  const expiredCerts = certStatuses.filter(c => c.status === 'expired').length
+  const qualifiedReports = productReports.filter(r => r.conclusion === '合格').length
 
   const supplierData = {
-    company_name,
+    company_name, sc_number: sc_number || '未提供', credit_code: credit_code || '未提供',
+    address: address || '未提供',
     certs: certStatuses,
-    cert_count: certs.length,
-    valid_certs: certStatuses.filter(c => c.status === 'valid').length,
-    expiring_soon_certs: certStatuses.filter(c => c.status === 'expiring_soon').length,
-    expired_certs: certStatuses.filter(c => c.status === 'expired').length,
-    product_reports: reportsForSupplier.map(r => ({
-      product_name: r.product_name,
-      conclusion: r.conclusion,
-      expiry_date: r.expiry_date
+    cert_count: certs.length, valid_certs: validCerts,
+    expiring_soon_certs: expiringCerts, expired_certs: expiredCerts,
+    product_reports: productReports.map(r => ({
+      product_name: r.product_name, report_type: r.report_type,
+      conclusion: r.conclusion, test_date: r.test_date, expiry_date: r.expiry_date
     })),
-    report_count: reportsForSupplier.length,
-    qualified_reports: reportsForSupplier.filter(r => r.conclusion === '合格').length
+    report_count: productReports.length, qualified_reports: qualifiedReports
   }
 
-  const aiResult = await aiSupplierScore(supplierData)
-  if (!aiResult) {
+  // Step 2-5: AI 综合分析（资质核验+处罚+抽检+经营异常+食安管控 五维评分）
+  const aiKey = process.env.AI_API_KEY
+  if (!aiKey) {
     return res.json({
       method: 'fallback',
-      message: 'AI 服务未配置，请配置 AI_API_KEY 后使用供应商评分功能',
+      message: 'AI 服务未配置，请配置 AI_API_KEY 后使用。\n\n系统已从数据库提取以下信息供人工审核：\n· 证照总数：' + certs.length + '（有效' + validCerts + '/临期' + expiringCerts + '/过期' + expiredCerts + '）\n· 产品报告：' + productReports.length + '（合格' + qualifiedReports + '）',
       supplier_data: supplierData
     })
   }
 
-  res.json({ method: 'ai', ...aiResult, supplier_data: supplierData })
+  const prompt = `你是食品供应商合规审核专家。请基于以下数据对该供应商进行五维合规评估。
+
+## 供应商数据
+- 企业名称：${company_name}
+- SC许可证编号：${sc_number || '未提供'}
+- 统一社会信用代码：${credit_code || '未提供'}
+- 注册地址：${address || '未提供'}
+- 证照清单：${JSON.stringify(certStatuses.map(c => ({名称:c.name, 状态:c.status, 到期日:c.expiry_date, 类型:c.category})))}
+- 产品报告：${JSON.stringify(productReports.map(r => ({产品:r.product_name, 类型:r.report_type, 结论:r.conclusion, 检测日期:r.test_date})))}
+
+## 评估维度（严格按以下5维，不得增减）
+1. 资质合规性：证照是否齐全有效、是否三证一致、是否存在过期/临期
+2. 行政处罚：基于企业名称判断是否有已知的食品安全行政处罚（注明信息局限性）
+3. 产品抽检：基于产品报告结论分析抽检合格率，识别不合格项
+4. 经营异常：判断是否存在经营异常风险（如证照大量过期=经营异常信号）
+5. 食安管控：基于证照管理规范性、产品报告完整性评估食安体系有效性
+
+## 评分规则
+- 每个维度0-100分，综合=加权平均
+- 任一维度<60 → 综合高风险
+- 3个及以上维度<75 → 综合高风险
+- 1-2个维度<75 → 中风险
+- 全部>=75 → 低风险
+
+## 返回JSON格式
+{
+  "total_score": 数字,
+  "level": "低风险|中风险|高风险",
+  "summary": "综合评估摘要（2-3句话）",
+  "dimensions": [
+    {"name":"资质合规性","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":["发现1","发现2"],"suggestion":"建议"},
+    {"name":"行政处罚","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":["发现或说明"],"suggestion":"建议"},
+    {"name":"产品抽检","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
+    {"name":"经营异常","score":数字,"max":15,"weight":15,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
+    {"name":"食安管控","score":数字,"max":10,"weight":10,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"}
+  ],
+  "risk_tips": ["风险提示1","风险提示2"],
+  "disclaimer": "本报告基于系统数据库记录和AI分析生成。行政处罚、经营异常等信息因未经在线实时核验，可能存在遗漏，建议人工补充核实。"
+}`
+
+  const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: '你是食品供应商合规审核专家，精通GB 14881、HACCP、ISO 22000等标准。严格按JSON格式返回，不要添加额外说明。' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 2500, temperature: 0.3,
+      response_format: { type: 'json_object' }
+    })
+  })
+  const aiData = await aiRes.json()
+  const text = aiData.choices?.[0]?.message?.content || ''
+  const json = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, ''))
+
+  res.json({ method: 'ai', ...json, supplier_data: supplierData })
+  } catch (e) {
+    console.error('[supplier-score] 错误:', e.message)
+    res.status(500).json({ method: 'error', message: '审核失败: ' + (e.message || 'unknown') })
+  }
 })
 
 // ===== AI 客诉分类定级 =====

@@ -2,65 +2,95 @@
   <div class="page-container">
     <div class="toolbar"><h2>供应商合规审核</h2></div>
 
+    <!-- 输入区 -->
     <el-row :gutter="16">
       <el-col :span="8">
         <el-card shadow="hover">
-          <template #header><span class="card-header">📋 选择供应商</span></template>
-          <el-select v-model="selectedCompany" filterable placeholder="搜索供应商名称..." style="width:100%" size="large" @change="onCompanyChange">
-            <el-option v-for="c in companies" :key="c" :label="c" :value="c" />
-          </el-select>
-          <div v-if="selectedCompany && supplierInfo" class="supplier-summary">
+          <template #header><span class="card-title">📋 企业信息</span></template>
+          <el-form :model="form" label-position="top">
+            <el-form-item label="企业名称 *">
+              <el-input v-model="form.company_name" placeholder="请输入完整企业名称，如：XX食品有限公司" size="large" clearable @keyup.enter="handleAudit" />
+            </el-form-item>
+            <el-form-item label="SC 许可证编号（选填）">
+              <el-input v-model="form.sc_number" placeholder="SC + 14位数字，如：SC12531011300700" />
+            </el-form-item>
+            <el-form-item label="统一社会信用代码（选填）">
+              <el-input v-model="form.credit_code" placeholder="18位字母数字" />
+            </el-form-item>
+            <el-form-item label="注册地址（选填）">
+              <el-input v-model="form.address" placeholder="企业注册/生产地址" />
+            </el-form-item>
+            <el-button type="primary" size="large" style="width:100%" @click="handleAudit" :loading="loading">
+              🤖 开始合规审核
+            </el-button>
+          </el-form>
+
+          <!-- 数据库已有数据摘要 -->
+          <div v-if="supplierData" class="db-summary">
             <el-divider />
-            <div class="info-row"><span class="info-label">证照总数</span><span class="info-value">{{ supplierInfo.cert_count }}</span></div>
-            <div class="info-row"><span class="info-label">有效证照</span><span class="info-value" style="color:#67c23a">{{ supplierInfo.valid_certs }}</span></div>
-            <div class="info-row"><span class="info-label">临期证照</span><span class="info-value" style="color:#e6a23c">{{ supplierInfo.expiring_soon_certs }}</span></div>
-            <div class="info-row"><span class="info-label">过期证照</span><span class="info-value" style="color:#f56c6c">{{ supplierInfo.expired_certs }}</span></div>
-            <div class="info-row"><span class="info-label">产品报告</span><span class="info-value">{{ supplierInfo.report_count }}（合格 {{ supplierInfo.qualified_reports }}）</span></div>
-            <el-button type="primary" size="large" style="width:100%;margin-top:16px" @click="handleAudit" :loading="auditing">🤖 开始 AI 审核</el-button>
+            <div class="summary-title">📊 系统已有数据</div>
+            <div class="info-row"><span>证照总数</span><span class="val">{{ supplierData.cert_count }}</span></div>
+            <div class="info-row"><span>有效证照</span><span class="val green">{{ supplierData.valid_certs }}</span></div>
+            <div class="info-row"><span>临期证照</span><span class="val orange">{{ supplierData.expiring_soon_certs }}</span></div>
+            <div class="info-row"><span>过期证照</span><span class="val red">{{ supplierData.expired_certs }}</span></div>
+            <div class="info-row"><span>产品报告</span><span class="val">{{ supplierData.report_count }}（合格 {{ supplierData.qualified_reports }}）</span></div>
           </div>
         </el-card>
       </el-col>
 
+      <!-- 结果区 -->
       <el-col :span="16">
         <el-card shadow="hover">
-          <template #header><span class="card-header">📊 审核结果</span></template>
-          <div v-if="!auditResult && !auditing && !auditFallback" class="empty-hint">请选择供应商后点击"开始 AI 审核"</div>
-          <div v-if="auditing" class="empty-hint">🤖 AI 正在分析审核...</div>
+          <template #header>
+            <div class="result-header">
+              <span class="card-title">📊 合规审核报告</span>
+              <span v-if="result" class="report-badge" :class="'level-' + result.level">综合{{ result.level }}</span>
+            </div>
+          </template>
 
-          <div v-if="auditResult" class="score-body">
-            <div class="score-hero">
-              <el-progress type="dashboard" :percentage="auditResult.total_score" :color="scoreColor" :width="150">
-                <template #default><span class="score-num">{{ auditResult.total_score }}</span></template>
+          <div v-if="!result && !loading && !fallback" class="empty">输入企业名称后点击"开始合规审核"</div>
+          <div v-if="loading" class="empty">🤖 AI 正在进行六步合规审核...</div>
+
+          <!-- AI 结果 -->
+          <div v-if="result" class="result-body">
+            <!-- 综合评分 -->
+            <div class="hero">
+              <el-progress type="dashboard" :percentage="result.total_score" :color="scoreColor" :width="130">
+                <span class="score-num">{{ result.total_score }}</span>
               </el-progress>
-              <div class="score-grade">
-                <div class="grade-badge" :style="{background:gradeBg}">{{ auditResult.level }}</div>
-                <div class="grade-label">{{ auditResult.level_label }}</div>
+              <div class="hero-info">
+                <div class="hero-level" :style="{color: scoreColor}">{{ result.level === '高风险' ? '🔴' : result.level === '中风险' ? '🟡' : '🟢' }} {{ result.level }}</div>
+                <div class="hero-summary">{{ result.summary }}</div>
               </div>
             </div>
 
+            <!-- 五维评分 -->
             <el-divider />
-
-            <div class="dims">
-              <div v-for="d in auditResult.dimensions" :key="d.name" class="dim-row">
-                <div class="dim-top">
-                  <span class="dim-name">{{ d.name }}</span>
-                  <span class="dim-score">{{ d.score }}<small>/{{ d.max }}</small></span>
-                </div>
-                <el-progress :percentage="Math.round(d.score/d.max*100)" :stroke-width="10" :color="dimBarColor(d.score/d.max)" />
-                <div class="dim-comment">{{ d.comment }}</div>
+            <div class="dims-title">五维合规评估</div>
+            <div class="dim-card" v-for="dim in result.dimensions" :key="dim.name" :class="'dim-' + dim.level">
+              <div class="dim-top">
+                <span class="dim-name">{{ dim.name }}</span>
+                <span class="dim-score" :style="{color: dimColor(dim.score, dim.max)}">{{ dim.score }}<small>/{{ dim.max }}</small></span>
+                <el-tag :type="dim.level==='高风险'?'danger':dim.level==='中风险'?'warning':'success'" size="small">{{ dim.level }}</el-tag>
               </div>
+              <el-progress :percentage="Math.round(dim.score/dim.max*100)" :stroke-width="6" :color="dimColor(dim.score, dim.max)" :show-text="false" />
+              <div class="dim-findings" v-if="dim.findings && dim.findings.length">
+                <div class="finding" v-for="(f, i) in dim.findings" :key="i">• {{ f }}</div>
+              </div>
+              <div class="dim-sug" v-if="dim.suggestion">💡 {{ dim.suggestion }}</div>
             </div>
 
-            <el-divider />
-            <div class="score-summary">{{ auditResult.summary }}</div>
-
-            <div v-if="auditResult.risk_tips && auditResult.risk_tips.length" class="risk-box">
+            <!-- 风险提示 -->
+            <div v-if="result.risk_tips && result.risk_tips.length" class="risk-box">
               <strong>⚠️ 风险提示</strong>
-              <ul><li v-for="(t,i) in auditResult.risk_tips" :key="i">{{ t }}</li></ul>
+              <ul><li v-for="(t,i) in result.risk_tips" :key="i">{{ t }}</li></ul>
             </div>
+
+            <!-- 免责声明 -->
+            <div class="disclaimer" v-if="result.disclaimer">📌 {{ result.disclaimer }}</div>
           </div>
 
-          <div v-if="auditFallback" class="empty-hint">{{ auditFallback }}</div>
+          <div v-if="fallback" class="empty" style="white-space:pre-wrap">{{ fallback }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -68,101 +98,88 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import request from '../../utils/request'
+import { ref, reactive, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
-const companies = ref([])
-const selectedCompany = ref('')
-const supplierInfo = ref(null)
-const auditing = ref(false)
-const auditResult = ref(null)
-const auditFallback = ref('')
+const loading = ref(false); const result = ref(null); const fallback = ref(''); const supplierData = ref(null)
 
 const userStr = localStorage.getItem('user')
 const user = userStr ? JSON.parse(userStr) : {}
 const userId = user.id
 
+const form = reactive({ company_name: '', sc_number: '', credit_code: '', address: '' })
+
 const scoreColor = computed(() => {
-  if (!auditResult.value) return '#409eff'
-  const s = auditResult.value.total_score
-  if (s >= 90) return '#67c23a'
-  if (s >= 75) return '#409eff'
+  if (!result.value) return '#409eff'
+  const s = result.value.total_score
+  if (s >= 75) return '#67c23a'
   if (s >= 60) return '#e6a23c'
   return '#f56c6c'
 })
 
-const gradeBg = computed(() => {
-  if (!auditResult.value) return '#909399'
-  const lv = auditResult.value.level
-  if (lv === 'A') return '#67c23a'
-  if (lv === 'B') return '#409eff'
-  if (lv === 'C') return '#e6a23c'
+const dimColor = (score, max) => {
+  const pct = score / max
+  if (pct >= 0.75) return '#67c23a'
+  if (pct >= 0.6) return '#e6a23c'
   return '#f56c6c'
-})
-
-const dimBarColor = (ratio) => {
-  if (ratio >= 0.9) return '#67c23a'
-  if (ratio >= 0.7) return '#409eff'
-  if (ratio >= 0.5) return '#e6a23c'
-  return '#f56c6c'
-}
-
-onMounted(async () => {
-  try {
-    const res = await request.get('/certificates', { params: { user_id: userId, category: 'supplier' } })
-    companies.value = [...new Set(res.list.map(r => r.company_name).filter(Boolean))].sort()
-  } catch {}
-})
-
-const onCompanyChange = () => {
-  auditResult.value = null
-  auditFallback.value = ''
-  supplierInfo.value = null
 }
 
 const handleAudit = async () => {
-  if (!selectedCompany.value) return
-  auditing.value = true; auditResult.value = null; auditFallback.value = ''
+  if (!form.company_name.trim()) { ElMessage.warning('请输入企业名称'); return }
+  loading.value = true; result.value = null; fallback.value = ''; supplierData.value = null
   try {
-    const res = await axios.post('/api/ai/supplier-score', { user_id: userId, company_name: selectedCompany.value })
+    const res = await axios.post('/api/ai/supplier-score', { user_id: userId, ...form })
     if (res.data.method === 'fallback') {
-      auditFallback.value = res.data.message
+      fallback.value = res.data.message
+      supplierData.value = res.data.supplier_data || null
+    } else if (res.data.method === 'error') {
+      fallback.value = res.data.message
     } else {
-      auditResult.value = res.data
-      supplierInfo.value = res.data.supplier_data
+      result.value = res.data
+      supplierData.value = res.data.supplier_data || null
     }
   } catch (e) {
-    auditFallback.value = '审核失败，请重试'
-  } finally { auditing.value = false }
+    fallback.value = '审核请求失败，请重试'
+  } finally { loading.value = false }
 }
 </script>
 
 <style scoped>
-.page-container { padding: 0; }
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.toolbar h2 { margin: 0; color: #303133; }
-.card-header { font-weight: bold; color: #303133; }
-.supplier-summary { text-align: left; }
-.info-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
-.info-label { color: #909399; }
-.info-value { color: #303133; font-weight: bold; }
-.empty-hint { text-align: center; color: #c0c4cc; padding: 80px 20px; font-size: 15px; }
-.score-body { padding: 10px 0; }
-.score-hero { display: flex; align-items: center; justify-content: center; gap: 30px; }
-.score-num { font-size: 40px; font-weight: bold; color: #303133; }
-.score-grade { text-align: center; }
-.grade-badge { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: #fff; margin: 0 auto 6px; }
-.grade-label { font-size: 16px; color: #303133; font-weight: bold; }
-.dims { padding: 8px 0; }
-.dim-row { margin-bottom: 16px; }
-.dim-top { display: flex; justify-content: space-between; margin-bottom: 6px; }
-.dim-name { font-size: 14px; color: #303133; font-weight: 500; }
-.dim-score { font-size: 16px; font-weight: bold; color: #303133; }
-.dim-score small { font-size: 12px; color: #909399; font-weight: normal; }
-.dim-comment { font-size: 12px; color: #909399; margin-top: 4px; }
-.score-summary { padding: 12px; background: #f0f9eb; border-radius: 8px; font-size: 13px; line-height: 1.6; color: #303133; }
-.risk-box { margin-top: 12px; padding: 12px; background: #fef0f0; border-radius: 8px; font-size: 13px; color: #303133; }
-.risk-box ul { margin: 4px 0 0 16px; padding: 0; }
-.risk-box li { line-height: 1.8; }
+.page-container { padding: 0; } .toolbar { margin-bottom: 16px; } .toolbar h2 { margin: 0; color: #303133; }
+.card-title { font-weight: bold; color: #303133; }
+.result-header { display: flex; justify-content: space-between; align-items: center; }
+.report-badge { padding: 4px 16px; border-radius: 16px; font-size: 13px; font-weight: 600; color: white; }
+.level-高风险 { background: #dc2626; } .level-中风险 { background: #ea580c; } .level-低风险 { background: #16a34a; }
+.empty { text-align: center; color: #c0c4cc; padding: 80px 20px; font-size: 15px; }
+
+/* 数据库摘要 */
+.db-summary { font-size: 13px; }
+.summary-title { font-weight: 600; color: #374151; margin-bottom: 8px; }
+.info-row { display: flex; justify-content: space-between; padding: 4px 0; color: #6b7280; }
+.info-row .val { font-weight: 600; color: #1a1a2e; }
+.info-row .green { color: #16a34a; } .info-row .orange { color: #ea580c; } .info-row .red { color: #dc2626; }
+
+/* 结果 */
+.result-body { padding: 10px 0; }
+.hero { display: flex; align-items: center; justify-content: center; gap: 24px; }
+.score-num { font-size: 32px; font-weight: 800; color: #1a1a2e; }
+.hero-info { text-align: left; }
+.hero-level { font-size: 22px; font-weight: 700; }
+.hero-summary { font-size: 13px; color: #6b7280; margin-top: 4px; max-width: 300px; }
+
+.dims-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+.dim-card { padding: 14px; margin-bottom: 10px; background: #f9fafb; border-radius: 10px; border-left: 4px solid #d1d5db; }
+.dim-高风险 { border-left-color: #dc2626; background: #fef2f2; }
+.dim-中风险 { border-left-color: #ea580c; background: #fff7ed; }
+.dim-低风险 { border-left-color: #16a34a; background: #f0fdf4; }
+.dim-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.dim-name { font-weight: 600; font-size: 14px; color: #1a1a2e; flex: 1; }
+.dim-score { font-size: 18px; font-weight: 700; } .dim-score small { font-size: 11px; color: #9ca3af; font-weight: normal; }
+.dim-findings { margin: 8px 0; } .finding { font-size: 12px; color: #6b7280; padding: 2px 0; }
+.dim-sug { font-size: 12px; color: #374151; margin-top: 4px; padding: 6px 10px; background: rgba(255,255,255,0.7); border-radius: 6px; }
+
+.risk-box { margin-top: 12px; padding: 12px; background: #fef2f2; border-radius: 8px; font-size: 13px; }
+.risk-box ul { margin: 4px 0 0 16px; padding: 0; } .risk-box li { line-height: 1.8; }
+.disclaimer { margin-top: 12px; padding: 10px 14px; background: #f0f5ff; border-radius: 8px; font-size: 12px; color: #6b7280; line-height: 1.6; }
 </style>
