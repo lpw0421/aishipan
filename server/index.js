@@ -1140,6 +1140,97 @@ app.get('/api/dashboard/health-score', (req, res) => {
   }
 })
 
+// AI 智能日报
+app.get('/api/dashboard/daily-report', (req, res) => {
+  try {
+  const userId = req.query.user_id
+  if (!userId) return res.status(400).json({ message: '缺少用户标识' })
+
+  const now = new Date()
+  const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
+
+  // 收集各模块数据
+  const certTotal = db.prepare('SELECT COUNT(*) AS cnt FROM certificates WHERE user_id = ?').get(userId).cnt
+  const certExpiring = db.prepare("SELECT COUNT(*) AS cnt FROM certificates WHERE user_id = ? AND is_permanent = 0 AND expiry_date >= ? AND expiry_date <= date(?, '+30 days')").get(userId, new Date().toISOString().slice(0,10), new Date().toISOString().slice(0,10)).cnt
+
+  const healthTotal = db.prepare('SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ?').get(userId).cnt
+  const healthExpiring = db.prepare("SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+30 days')").get(userId, new Date().toISOString().slice(0,10), new Date().toISOString().slice(0,10)).cnt
+
+  const reportTotal = db.prepare('SELECT COUNT(*) AS cnt FROM product_reports WHERE user_id = ?').get(userId).cnt
+  const reportToday = db.prepare("SELECT COUNT(*) AS cnt FROM product_reports WHERE user_id = ? AND test_date = ?").get(userId, new Date().toISOString().slice(0,10)).cnt
+
+  const complaintTotal = db.prepare('SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ?').get(userId).cnt
+  const complaintPending = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中')").get(userId).cnt
+
+  const deviceCount = db.prepare('SELECT COUNT(*) AS cnt FROM calibration_devices WHERE user_id = ?').get(userId).cnt
+  const deviceAbnormal = db.prepare("SELECT COUNT(*) AS cnt FROM calibration_devices WHERE user_id = ? AND calibration_status != '正常'").get(userId).cnt
+
+  const trainingPlanCount = db.prepare('SELECT COUNT(*) AS cnt FROM training_plans WHERE user_id = ?').get(userId).cnt
+
+  // 今日概览
+  const overview = [
+    { label: '资质总数', value: certTotal + ' 个' + (certExpiring > 0 ? '，' + certExpiring + ' 个临期' : '，全部正常'), warn: certExpiring > 0 },
+    { label: '健康证', value: healthTotal + ' 人' + (healthExpiring > 0 ? '，' + healthExpiring + ' 人即将到期' : '，全部有效'), warn: healthExpiring > 0 },
+    { label: '待处理客诉', value: complaintPending + ' 件', warn: complaintPending > 0 },
+    { label: '原料验收今日', value: '完成 ' + reportToday + ' 批次' },
+    { label: '设备状态', value: deviceCount + ' 台' + (deviceAbnormal > 0 ? '，' + deviceAbnormal + ' 台异常' : '，全部正常'), warn: deviceAbnormal > 0 }
+  ]
+
+  // 需要关注
+  const alerts = []
+  // 7天内到期资质
+  const urgentCerts = db.prepare(
+    "SELECT name, company_name, expiry_date FROM certificates WHERE user_id = ? AND is_permanent = 0 AND expiry_date >= ? AND expiry_date <= date(?, '+7 days')"
+  ).all(userId, new Date().toISOString().slice(0,10), new Date().toISOString().slice(0,10))
+  urgentCerts.forEach(c => {
+    const days = Math.ceil((new Date(c.expiry_date) - now) / 86400000)
+    alerts.push({ text: `${c.company_name || ''} ${c.name} ${days} 天内到期`, urgent: days <= 3 })
+  })
+
+  // 7天内到期健康证
+  const urgentHealth = db.prepare(
+    "SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+7 days')"
+  ).all(userId, new Date().toISOString().slice(0,10), new Date().toISOString().slice(0,10))
+  urgentHealth.forEach(h => {
+    const days = Math.ceil((new Date(h.expiry_date) - now) / 86400000)
+    alerts.push({ text: `${h.employee_name} 健康证 ${days} 天内到期`, urgent: days <= 3 })
+  })
+
+  // 超时客诉
+  const overdueComplaints = db.prepare(
+    "SELECT product_name, created_at FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中') AND created_at <= date(?, '-2 days')"
+  ).all(userId, new Date().toISOString().slice(0,10))
+  overdueComplaints.forEach(c => {
+    alerts.push({ text: `客诉超时未处理：${c.product_name}`, urgent: true })
+  })
+
+  // 系统建议
+  const suggestions = []
+  if (urgentCerts.length > 0) suggestions.push(`建议尽快联系供应商更新 ${urgentCerts.length} 项即将到期的资质`)
+  if (urgentHealth.length > 0) suggestions.push(`建议安排 ${urgentHealth.length} 名员工进行健康体检`)
+  if (complaintPending > 0) suggestions.push(`建议优先处理 ${complaintPending} 件待处理客诉，避免超时升级`)
+  if (deviceAbnormal > 0) suggestions.push(`建议安排 ${deviceAbnormal} 台异常设备的校准或维修`)
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const pestFindings = db.prepare(
+    "SELECT COUNT(*) AS cnt FROM pest_inspections WHERE user_id = ? AND inspection_date >= ? AND findings_type != '' AND findings_type IS NOT NULL"
+  ).get(userId, thirtyDaysAgo.toISOString().slice(0,10)).cnt
+  if (pestFindings > 0) suggestions.push(`近30天虫害发现 ${pestFindings} 次异常，建议加强巡检频率`)
+  if (trainingPlanCount === 0) suggestions.push('建议制定员工培训计划，保持合规培训记录')
+  if (suggestions.length === 0) suggestions.push('系统运行良好，暂无特别建议。继续保持！')
+
+  res.json({
+    generated_at: timeStr,
+    overview,
+    alerts: alerts.slice(0, 6),
+    suggestions: suggestions.slice(0, 5)
+  })
+  } catch (e) {
+    console.error('[daily-report] 错误:', e.message || e)
+    res.status(500).json({ message: '日报生成失败', error: e.message || 'unknown' })
+  }
+})
+
 // ===== 健康证管理接口 =====
 
 // 获取健康证列表（支持按姓名/部门搜索）
