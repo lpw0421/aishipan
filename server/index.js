@@ -1789,26 +1789,77 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     })
   }
 
-  // 尝试联网搜索企业公开信息
+  // ===== 联网搜索（中国可访问引擎） =====
   let webInfo = ''
-  try {
-    const searchQuery = encodeURIComponent(company_name + ' 食品生产许可证 行政处罚')
-    const searchRes = await fetch('https://www.google.com/search?q=' + searchQuery, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(5000)
-    })
-    if (searchRes.ok) {
-      const html = await searchRes.text()
-      // 简单提取文本摘要
-      const snippets = html.match(/<span[^>]*>[^<]*公司[^<]*食品[^<]*<\/span>/gi) || []
-      webInfo = '\n\n## 联网搜索结果摘要\n' + snippets.slice(0, 10).map(s => '- ' + s.replace(/<[^>]+>/g, '')).join('\n')
+  const searchEngines = [
+    {
+      name: 'DuckDuckGo',
+      url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`,
+      parse: (html) => {
+        const links = []
+        const re = /<a[^>]*href="([^"]+)"[^>]*class="result-link"[^>]*>([^<]+)<\/a>/gi
+        let m; while ((m = re.exec(html)) !== null) links.push({ title: m[2].trim(), url: m[1] })
+        const snips = []
+        const re2 = /<td class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi
+        let m2; while ((m2 = re2.exec(html)) !== null) snips.push(m2[1].replace(/<[^>]+>/g, '').trim())
+        return { links: links.slice(0, 8), snippets: snips.slice(0, 8) }
+      }
+    },
+    {
+      name: 'Bing',
+      url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      parse: (html) => {
+        const snips = []
+        const re = /<p[^>]*class="b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/gi
+        let m; while ((m = re.exec(html)) !== null) {
+          const t = m[1].replace(/<[^>]+>/g, '').trim()
+          if (t.length > 10) snips.push(t)
+        }
+        return { links: [], snippets: snips.slice(0, 8) }
+      }
     }
-  } catch (e) {
-    // 搜索失败不影响主流程
-    console.log('[supplier-score] 联网搜索未获取到结果:', e.message)
+  ]
+
+  // 按PDF六步设计，搜索三类信息
+  const searchQueries = [
+    `${company_name} 食品生产许可证 SC`,
+    `${company_name} 行政处罚 食品安全`,
+    `${company_name} 抽检不合格 食品`
+  ]
+
+  for (const query of searchQueries) {
+    for (const engine of searchEngines) {
+      try {
+        const opts = { signal: AbortSignal.timeout(8000) }
+        if (engine.headers) opts.headers = engine.headers
+        const res = await fetch(engine.url(query), opts)
+        if (res.ok) {
+          const html = await res.text()
+          const parsed = engine.parse(html)
+          if (parsed.snippets.length > 0) {
+            webInfo += `\n### ${engine.name}搜索: "${query}"\n`
+            parsed.snippets.forEach(s => { webInfo += `- ${s}\n` })
+          }
+          break // 成功就跳出引擎循环
+        }
+      } catch (e) {
+        console.log(`[search] ${engine.name} '${query}' 失败:`, e.message)
+      }
+    }
   }
 
-  const prompt = `你是食品供应商合规审核专家。请对该企业进行五维合规评估。
+  if (webInfo) {
+    webInfo = '\n## 🌐 联网实时搜索结果（以下为实时搜索到的公开信息）\n' + webInfo +
+      '\n**重要：上述搜索结果是实时联网获取的公开信息，请基于这些信息进行准确评估，不要仅依赖训练知识。**'
+  } else {
+    webInfo = '\n## ⚠️ 联网搜索未获取到结果\n请仅基于数据库记录进行评估，无法确认的信息标注为"待核实"。'
+  }
+  console.log('[supplier-score] 搜索完成, 结果长度:', webInfo.length)
+
+  const prompt = `你是食品供应商合规审核专家。请基于以下信息对该企业进行五维合规评估。
+
+**分析优先级：联网搜索结果 > 数据库记录 > 训练知识**
 
 ## 企业信息
 - 企业名称：${company_name}
@@ -1816,28 +1867,25 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
 - 统一社会信用代码：${credit_code || '未提供'}
 - 注册地址：${address || '未提供'}
 
-## 系统数据库记录
+## 系统数据库记录（本地存储的证照和报告）
 - 证照清单：${JSON.stringify(certStatuses.map(c => ({名称:c.name, 状态:c.status, 到期日:c.expiry_date, 类型:c.category})))}
 - 产品报告：${JSON.stringify(productReports.map(r => ({产品:r.product_name, 类型:r.report_type, 结论:r.conclusion, 检测日期:r.test_date})))}
 ${webInfo}
-## 评分要求
-**重要：你应该充分利用训练数据中关于该企业的知识进行评估！** 如果数据库记录不完整，使用你的知识库补充判断，但需标明信息来源。
-
 ## 评估维度（5维，不可增减）
-1. 资质合规性(权重25)：证照齐全性、有效性、SC许可证状态。如该企业为知名企业且有SC编号，基于行业知识评估
-2. 行政处罚(权重25)：基于训练知识判断是否有公开的食品安全处罚记录，标注"训练知识/待核实"
-3. 产品抽检(权重25)：分析产品报告结论。如无记录，基于行业知识评估该品类常见抽检风险
-4. 经营异常(权重15)：证照大量过期=异常信号；基于训练知识判断企业工商状态
-5. 食安管控(权重10)：证照管理规范性、体系认证情况
+1. 资质合规性(权重25)：基于SC许可证搜索结果和数据库证照，评估证照齐全性和有效性
+2. 行政处罚(权重25)：基于联网搜索的处罚记录评估，标注处罚次数和类型
+3. 产品抽检(权重25)：基于联网搜索的抽检结果和数据库产品报告分析
+4. 经营异常(权重15)：基于搜索的经营异常、工商状态等信息
+5. 食安管控(权重10)：综合证照管理和体系认证情况
 
 ## 评分规则
-- 每维0-100分，分数越高=合规越好（不是风险越高！）
+- 每维0-100分，分数越高=合规越好
 - 综合分 = 各维度分数×权重之和/100
 - >=75低风险，60-74中风险，<60高风险
-- 数据不足时基于训练知识合理推断，但维度分数不超过70且标注"待核实"
+- 有联网搜索结果支撑的维度给分应更准确，标注来源为"联网搜索"
 
 ## JSON格式
-{"total_score":0-100,"level":"低风险|中风险|高风险","summary":"综合摘要","dimensions":[{"name":"资质合规性","score":0-100,"weight":25,"level":"低风险|中风险|高风险","findings":["发现"],"source":"数据库|训练知识|联网搜索","suggestion":"建议"},...],"risk_tips":["风险提示"],"disclaimer":"免责声明"}`
+{"total_score":0-100,"level":"低风险|中风险|高风险","summary":"综合摘要","dimensions":[{"name":"资质合规性","score":0-100,"weight":25,"level":"低风险|中风险|高风险","findings":["发现"],"source":"联网搜索|数据库|待核实","suggestion":"建议"},...],"risk_tips":["风险提示"],"disclaimer":"免责声明"}`
 
   const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
     method: 'POST',
