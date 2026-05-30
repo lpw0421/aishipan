@@ -1064,8 +1064,10 @@ app.get('/api/dashboard/stats', (req, res) => {
 
 // 健康指数评分
 app.get('/api/dashboard/health-score', (req, res) => {
+  try {
   const userId = req.query.user_id
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
+  console.log('[health-score] 开始计算, userId:', userId)
 
   // 1. 资质合规 (权重 25%)
   const certs = db.prepare('SELECT expiry_date, is_permanent FROM certificates WHERE user_id = ?').all(userId)
@@ -1132,6 +1134,10 @@ app.get('/api/dashboard/health-score', (req, res) => {
         detail: `正常 ${deviceNormal}/${deviceTotal}`, route: '/third-party/calibration' }
     ]
   })
+  } catch (e) {
+    console.error('[health-score] 错误:', e.message || e)
+    res.status(500).json({ message: '评分计算失败', error: e.message || 'unknown' })
+  }
 })
 
 // ===== 健康证管理接口 =====
