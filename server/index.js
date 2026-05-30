@@ -1862,6 +1862,109 @@ function generateComplaintNumber() {
   return `KC-${dateStr}-${String(count + 1).padStart(3, '0')}`
 }
 
+// ===== AI 智能体共享调用 =====
+async function callAI(systemPrompt, userContent, fallbackMsg) {
+  const aiKey = process.env.AI_API_KEY
+  if (!aiKey) return { method: 'fallback', message: 'AI 服务未配置，请配置 AI_API_KEY 后使用。\n\n' + fallbackMsg }
+  try {
+    const res = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent }
+        ],
+        max_tokens: 2000, temperature: 0.3,
+        response_format: { type: 'json_object' }
+      })
+    })
+    const data = await res.json()
+    const text = data.choices?.[0]?.message?.content || ''
+    const json = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, ''))
+    return { method: 'ai', ...json }
+  } catch (e) {
+    console.error('[AI] 调用失败:', e.message)
+    return { method: 'fallback', message: 'AI 服务暂时不可用，请稍后重试。\n\n' + fallbackMsg }
+  }
+}
+
+// ---- 原料验收助手 ----
+app.post('/api/ai-audit/material', strictLimiter, async (req, res) => {
+  const { material_name, supplier, temperature, sensory, cert_checks, notes } = req.body
+  if (!material_name || !supplier) return res.status(400).json({ message: '请填写原料名称和供应商' })
+  const result = await callAI(
+    '你是食品企业原料验收专家。根据验收信息判定：accept(合格接收)/concession(让步接收)/reject(拒收)，给出风险评分(0-100)和处理建议。返回JSON: {"verdict":"accept|concession|reject","verdict_reason":"判定理由","risk_score":数字,"suggestions":"处理建议"}',
+    `原料：${material_name}\n供应商：${supplier}\n到货温度：${temperature != null ? temperature + '℃' : '未提供'}\n感官：${sensory || '未提供'}\n证件：${cert_checks?.join('、') || '未提供'}\n补充：${notes || '无'}`,
+    '系统内置判定规则：\n· 温度不符合要求 → 拒收\n· 证件不齐全 → 让步接收或拒收\n· 感官异常 → 拒收\n· 全部符合 → 合格接收'
+  )
+  res.json(result)
+})
+
+// ---- 文件编制助手 ----
+app.post('/api/ai-report/document', strictLimiter, async (req, res) => {
+  const { doc_type, company_name, product_scope, standards, requirements } = req.body
+  if (!company_name) return res.status(400).json({ message: '请填写企业名称' })
+  const typeMap = { manual: '管理手册', procedure: '程序文件', sop: '作业指导书', form: '记录表单', haccp: 'HACCP计划' }
+  const result = await callAI(
+    '你是食品企业体系文件编写专家。根据企业信息生成文件初稿。返回JSON: {"title":"文件标题","doc_number":"自动生成编号如XX-SP-001","generated_at":"当前时间","content":"文件正文（含章节结构，用HTML格式，h3标题p段落）","compliance_check":"合规性说明"}',
+    `文件类型：${typeMap[doc_type] || doc_type}\n企业名称：${company_name}\n产品范围：${product_scope || '未提供'}\n适用标准：${standards || '未提供'}\n特殊要求：${requirements || '无'}`,
+    '系统可生成基本文件框架，建议参考GB/T 27341标准进行调整。'
+  )
+  res.json(result)
+})
+
+// ---- SOP 撰写助手 ----
+app.post('/api/ai-report/sop', strictLimiter, async (req, res) => {
+  const { op_type, position, params, related_docs, standards } = req.body
+  if (!op_type) return res.status(400).json({ message: '请选择操作类型' })
+  const typeMap = { receiving: '收货检验', cleaning: '清洗消毒', temperature: '温度监控', pest: '虫害检查', equipment: '设备操作', traceability: '产品追溯', nonconforming: '不合格品处理', sampling: '留样管理' }
+  const result = await callAI(
+    '你是食品企业SOP编写专家。根据操作参数生成标准操作规程初稿。返回JSON: {"title":"SOP标题","doc_number":"编号","purpose":"目的","scope":"范围","responsibility":"职责","steps":"操作步骤(HTML格式 ol列表)","precautions":"注意事项","references":"关联法规标准"}',
+    `操作类型：${typeMap[op_type]}\n操作岗位：${position || '未指定'}\n关键参数：${params || '未提供'}\n关联文件：${related_docs || '无'}\n适用标准：${standards || '未提供'}`,
+    '系统可生成SOP框架，请根据实际工艺参数调整后使用。'
+  )
+  res.json(result)
+})
+
+// ---- 培训出题助手 ----
+app.post('/api/ai-tool/exam', strictLimiter, async (req, res) => {
+  const { course_content, question_types, difficulty, count } = req.body
+  if (!course_content) return res.status(400).json({ message: '请提供课程内容' })
+  const diffMap = { basic: '基础', medium: '中级', advanced: '高级' }
+  const result = await callAI(
+    '你是食品安全培训考核专家。根据课程内容生成考题。返回JSON: {"questions":[{"type":"single|multiple|judge","stem":"题目","options":["选项数组(判断题不需要)"],"answer":"正确答案","explanation":"解析(选填)"}],"difficulty_label":"难度说明"}',
+    `课程内容：${course_content}\n题型：${question_types?.join('、')}\n难度：${diffMap[difficulty] || difficulty}\n数量：${count || 5} 题`,
+    '系统可基于内容生成基础考题，建议培训师审核后使用。'
+  )
+  res.json(result)
+})
+
+// ---- 法规速查助手 ----
+app.post('/api/ai-tool/regulation', strictLimiter, async (req, res) => {
+  const { question } = req.body
+  if (!question) return res.status(400).json({ message: '请输入问题' })
+  const result = await callAI(
+    '你是食品安全法规专家，精通GB 7718、GB 2760、GB 28050、GB 14881等标准。根据问题匹配相关法规条款并解读。返回JSON: {"regulations":[{"standard":"标准号/名称","clause":"具体条款","interpretation":"通俗解读"}],"suggestion":"整改建议(如适用)"}',
+    `问题：${question}`,
+    '系统内置法规知识有限，建议查阅最新版标准原文确认。以下为常见法规速查建议：\n· 标签标注 → 查阅 GB 7718\n· 食品添加剂 → 查阅 GB 2760\n· 营养成分 → 查阅 GB 28050\n· 生产规范 → 查阅 GB 14881'
+  )
+  res.json(result)
+})
+
+// ---- HACCP 计划助手 ----
+app.post('/api/ai-tool/haccp', strictLimiter, async (req, res) => {
+  const { product_name, ingredients, process_flow, intended_use, packaging } = req.body
+  if (!product_name || !process_flow) return res.status(400).json({ message: '请填写产品名称和工艺流程' })
+  const result = await callAI(
+    '你是HACCP体系专家。根据产品信息进行危害分析，判定CCP并给出关键限值。返回JSON: {"hazards":[{"step":"工序","hazard_type":"生物|化学|物理","hazard_desc":"危害描述","severity":"高|中|低","likelihood":"高|中|低","is_ccp":"是|否"}],"ccps":[{"step":"CCP工序","significant_hazard":"显著危害","critical_limit":"关键限值","monitoring":"监控方式","corrective_action":"纠偏措施","verification":"验证方式"}]}',
+    `产品名称：${product_name}\n主要配料：${ingredients || '未提供'}\n工艺流程：${process_flow}\n预期用途：${intended_use || '未提供'}\n包装方式：${packaging || '未提供'}`,
+    '系统可生成基础HACCP分析框架，建议由HACCP小组评审确认后实施。'
+  )
+  res.json(result)
+})
+
 // 获取客诉列表
 app.get('/api/complaints', (req, res) => {
   const { user_id, keyword, status, type, urgency, start_date, end_date } = req.query
