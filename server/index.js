@@ -1789,8 +1789,26 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     })
   }
 
-  // ===== 联网搜索（中国可访问引擎：360搜索 + Bing中国） =====
+  // ===== 联网搜索（优先缓存 → 实时引擎） =====
   let webInfo = ''
+  let searchSource = '无'
+
+  // 1. 先查本地缓存
+  try {
+    const cacheRow = db.prepare("SELECT * FROM supplier_search_cache WHERE query = ? AND expires_at > datetime('now')").get(company_name.trim())
+    if (cacheRow) {
+      const cached = JSON.parse(cacheRow.results)
+      if (Array.isArray(cached) && cached.length > 0) {
+        webInfo = '\n## 🌐 缓存搜索（' + cacheRow.search_engine + ' | ' + cacheRow.searched_at + '）\n'
+        cached.forEach(s => { webInfo += '- ' + s + '\n' })
+        searchSource = '缓存'
+        console.log('[supplier-score] 使用缓存搜索, 条数:', cached.length)
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 2. 缓存未命中则实时搜索
+  if (!webInfo) {
   const searchEngines = [
     {
       name: 'Bing',
@@ -1900,8 +1918,10 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     return ''
   })
 
-  const searchResults = await Promise.all(searchTasks)
-  webInfo = searchResults.filter(Boolean).join('')
+    const searchResults = await Promise.all(searchTasks)
+    webInfo = searchResults.filter(Boolean).join('')
+    if (webInfo) searchSource = '实时搜索'
+  }
 
   if (webInfo) {
     webInfo = '\n## 🌐 联网实时搜索结果\n' + webInfo +
@@ -4435,6 +4455,35 @@ db.exec(`CREATE TABLE IF NOT EXISTS third_party (
   status TEXT DEFAULT '合作中', remarks TEXT DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME,
   FOREIGN KEY (user_id) REFERENCES users(id))`)
+
+// ---- 搜索缓存 ----
+db.exec(`CREATE TABLE IF NOT EXISTS supplier_search_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query TEXT NOT NULL UNIQUE,
+  results TEXT NOT NULL DEFAULT '',
+  search_engine TEXT DEFAULT 'WebSearch',
+  searched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME DEFAULT (datetime('now', '+7 days')))`)
+
+// 写入搜索缓存
+app.post('/api/search/cache', (req, res) => {
+  const { query, results, engine } = req.body
+  if (!query || !results) return res.status(400).json({ message: '缺少参数' })
+  const json = typeof results === 'string' ? results : JSON.stringify(results)
+  db.prepare(`INSERT INTO supplier_search_cache (query, results, search_engine, searched_at, expires_at)
+    VALUES (?, ?, ?, datetime('now'), datetime('now', '+7 days'))
+    ON CONFLICT(query) DO UPDATE SET results=excluded.results, search_engine=excluded.search_engine, searched_at=datetime('now'), expires_at=datetime('now', '+7 days')`)
+    .run(query.trim(), json, engine || 'WebSearch')
+  res.json({ ok: true, query: query.trim() })
+})
+
+// 查询缓存
+app.get('/api/search/cache', (req, res) => {
+  const { q } = req.query
+  if (!q) return res.status(400).json({ message: '缺少搜索词' })
+  const row = db.prepare("SELECT * FROM supplier_search_cache WHERE query = ? AND expires_at > datetime('now')").get(q.trim())
+  res.json(row ? { found: true, results: JSON.parse(row.results), engine: row.search_engine, searched_at: row.searched_at } : { found: false })
+})
 
 app.get('/api/third-party', (req, res) => {
   const { user_id, keyword, vendor_type, status } = req.query
