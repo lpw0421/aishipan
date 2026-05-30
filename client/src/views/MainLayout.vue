@@ -62,31 +62,47 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="/ai">
+        <el-sub-menu index="/ai-audit">
           <template #title>
             <el-icon><MagicStick /></el-icon>
-            <span>AI智能</span>
+            <span>AI 智能中心</span>
           </template>
-          <el-menu-item index="/ai/smart">
-            <el-icon><Document /></el-icon>
-            <span>标签审核</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/supplier-score">
-            <el-icon><StarFilled /></el-icon>
-            <span>供应商评分</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/complaint-classify">
-            <el-icon><CollectionTag /></el-icon>
-            <span>客诉分类定级</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/complaint-reply">
-            <el-icon><ChatDotSquare /></el-icon>
-            <span>客诉回复生成</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/complaint-analysis">
-            <el-icon><Search /></el-icon>
-            <span>客诉根因分析</span>
-          </el-menu-item>
+          <el-sub-menu index="ai-group-1">
+            <template #title><span>合规审核</span></template>
+            <el-menu-item index="/ai-audit/supplier">
+              <span>供应商合规审核</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/label">
+              <span>标签审核</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/material">
+              <span>原料验收助手</span>
+            </el-menu-item>
+          </el-sub-menu>
+          <el-sub-menu index="ai-group-2">
+            <template #title><span>文件报告</span></template>
+            <el-menu-item index="/ai-audit/complaint">
+              <span>客诉报告助手</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/document">
+              <span>文件编制助手</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/sop">
+              <span>SOP 撰写助手</span>
+            </el-menu-item>
+          </el-sub-menu>
+          <el-sub-menu index="ai-group-3">
+            <template #title><span>辅助工具</span></template>
+            <el-menu-item index="/ai-audit/exam">
+              <span>培训出题助手</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/regulation">
+              <span>法规速查助手</span>
+            </el-menu-item>
+            <el-menu-item index="/ai-audit/haccp">
+              <span>HACCP 计划助手</span>
+            </el-menu-item>
+          </el-sub-menu>
         </el-sub-menu>
 
         <el-menu-item index="/system">

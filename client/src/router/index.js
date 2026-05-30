@@ -25,16 +25,31 @@ const routes = [
         ]
       },
       { path: 'health-certs', redirect: '/personnel/health-certs' },
-      { path: 'label-audit', redirect: '/ai/smart' },
+      { path: 'label-audit', redirect: '/ai-audit/label' },
       {
         path: 'ai',
-        redirect: '/ai/smart',
+        redirect: '/ai-audit/supplier',
         children: [
-          { path: 'smart', component: () => import('../views/ai/SmartAudit.vue') },
-          { path: 'supplier-score', component: () => import('../views/ai/SupplierScore.vue') },
-          { path: 'complaint-classify', component: () => import('../views/ai/ComplaintClassify.vue') },
-          { path: 'complaint-reply', component: () => import('../views/ai/ComplaintReply.vue') },
-          { path: 'complaint-analysis', component: () => import('../views/ai/ComplaintAnalysis.vue') }
+          { path: 'smart', redirect: '/ai-audit/label' },
+          { path: 'supplier-score', redirect: '/ai-audit/supplier' },
+          { path: 'complaint-classify', redirect: '/ai-audit/complaint' },
+          { path: 'complaint-reply', redirect: '/ai-audit/complaint' },
+          { path: 'complaint-analysis', redirect: '/ai-audit/complaint' }
+        ]
+      },
+      {
+        path: 'ai-audit',
+        redirect: '/ai-audit/supplier',
+        children: [
+          { path: 'supplier', component: () => import('../views/ai-audit/SupplierAudit.vue') },
+          { path: 'label', component: () => import('../views/ai-audit/LabelWrapper.vue') },
+          { path: 'material', component: () => import('../views/ai-audit/MaterialInspection.vue') },
+          { path: 'complaint', component: () => import('../views/ai-audit/ComplaintReport.vue') },
+          { path: 'document', component: () => import('../views/ai-audit/DocumentHelper.vue') },
+          { path: 'sop', component: () => import('../views/ai-audit/SopHelper.vue') },
+          { path: 'exam', component: () => import('../views/ai-audit/ExamHelper.vue') },
+          { path: 'regulation', component: () => import('../views/ai-audit/RegulationHelper.vue') },
+          { path: 'haccp', component: () => import('../views/ai-audit/HaccpHelper.vue') }
         ]
       },
       {
