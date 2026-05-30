@@ -39,17 +39,20 @@ const routes = [
       },
       {
         path: 'ai-audit',
-        redirect: '/ai-audit/supplier',
+        redirect: '/ai-audit/compliance',
         children: [
-          { path: 'supplier', component: () => import('../views/ai-audit/SupplierAudit.vue') },
-          { path: 'label', component: () => import('../views/ai-audit/LabelWrapper.vue') },
-          { path: 'material', component: () => import('../views/ai-audit/MaterialInspection.vue') },
-          { path: 'complaint', component: () => import('../views/ai-audit/ComplaintReport.vue') },
-          { path: 'document', component: () => import('../views/ai-audit/DocumentHelper.vue') },
-          { path: 'sop', component: () => import('../views/ai-audit/SopHelper.vue') },
-          { path: 'exam', component: () => import('../views/ai-audit/ExamHelper.vue') },
-          { path: 'regulation', component: () => import('../views/ai-audit/RegulationHelper.vue') },
-          { path: 'haccp', component: () => import('../views/ai-audit/HaccpHelper.vue') }
+          { path: 'compliance', component: () => import('../views/ai-audit/ComplianceWrapper.vue') },
+          { path: 'report', component: () => import('../views/ai-audit/ReportWrapper.vue') },
+          { path: 'tool', component: () => import('../views/ai-audit/ToolWrapper.vue') },
+          { path: 'supplier', redirect: '/ai-audit/compliance' },
+          { path: 'label', redirect: '/ai-audit/compliance' },
+          { path: 'material', redirect: '/ai-audit/compliance' },
+          { path: 'complaint', redirect: '/ai-audit/report' },
+          { path: 'document', redirect: '/ai-audit/report' },
+          { path: 'sop', redirect: '/ai-audit/report' },
+          { path: 'exam', redirect: '/ai-audit/tool' },
+          { path: 'regulation', redirect: '/ai-audit/tool' },
+          { path: 'haccp', redirect: '/ai-audit/tool' }
         ]
       },
       {
