@@ -1793,6 +1793,31 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
   let webInfo = ''
   const searchEngines = [
     {
+      name: 'Bing',
+      url: (q) => `https://cn.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      parse: (html) => {
+        const snips = []
+        // b_algo 是 Bing 的主结果容器
+        const algoRe = /<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/gi
+        let m
+        while ((m = algoRe.exec(html)) !== null) {
+          const text = m[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim()
+          if (text.length > 20) snips.push(text.substring(0, 500))
+        }
+        // 如果 b_algo 没匹配到，尝试提取所有可见文本
+        if (snips.length === 0) {
+          const bodyText = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          // 查找包含关键信息的句子
+          const sentences = bodyText.split(/[。！？]/)
+          sentences.forEach(s => {
+            if (s.length > 20 && s.length < 300) snips.push(s.trim())
+          })
+        }
+        return snips.slice(0, 10)
+      }
+    },
+    {
       name: '360搜索',
       url: (q) => `https://www.so.com/s?q=${encodeURIComponent(q)}`,
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)' },
