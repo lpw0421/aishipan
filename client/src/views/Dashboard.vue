@@ -63,6 +63,48 @@
       <div class="spinner"></div>
     </div>
 
+    <!-- ===== AI 智能日报 ===== -->
+    <div class="daily-report-section" v-if="dailyReport">
+      <div class="report-header">
+        <h3>🤖 AI 智能日报</h3>
+        <span class="report-time">{{ dailyReport.generated_at }}</span>
+      </div>
+      <div class="report-grid">
+        <!-- 今日概览 -->
+        <div class="report-card">
+          <div class="report-card-title">📊 今日概览</div>
+          <div class="report-card-body">
+            <div class="overview-item" v-for="item in dailyReport.overview" :key="item.label">
+              <span class="ov-label">{{ item.label }}</span>
+              <span class="ov-value" :class="{ 'ov-warn': item.warn }">{{ item.value }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- 需要关注 -->
+        <div class="report-card">
+          <div class="report-card-title">🔴 需要关注</div>
+          <div class="report-card-body">
+            <div v-if="dailyReport.alerts.length === 0" class="report-empty">✅ 暂无需要关注的事项</div>
+            <div class="alert-item" v-for="(item, i) in dailyReport.alerts" :key="i">
+              <span class="alert-icon">{{ item.urgent ? '🔴' : '🟡' }}</span>
+              <span>{{ item.text }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- 系统建议 -->
+        <div class="report-card">
+          <div class="report-card-title">✅ 系统建议</div>
+          <div class="report-card-body">
+            <div v-if="dailyReport.suggestions.length === 0" class="report-empty">暂无建议</div>
+            <div class="sug-item" v-for="(item, i) in dailyReport.suggestions" :key="i">
+              <span class="sug-dot">💡</span>
+              <span>{{ item }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== 统计卡片 ===== -->
     <div class="stats-grid">
       <div class="stat-card" v-for="card in statCards" :key="card.label" @click="card.onClick ? card.onClick() : null">
@@ -279,6 +321,7 @@ const stats = reactive({
 const warnings = ref([])
 const healthScore = ref(null)
 const healthLoading = ref(false)
+const dailyReport = ref(null)
 
 // ===== 统计卡片 =====
 const statCards = computed(() => [
@@ -431,11 +474,19 @@ const fetchStats = async () => {
   }
 }
 
+const fetchDailyReport = async () => {
+  try {
+    const res = await request.get('/dashboard/daily-report', { params: { user_id: userId } })
+    dailyReport.value = res
+  } catch { /* ignore */ }
+}
+
 onMounted(() => {
   updateTime()
   timeTimer = setInterval(updateTime, 1000)
   fetchStats()
   fetchHealthScore()
+  fetchDailyReport()
 })
 
 onUnmounted(() => {
@@ -558,6 +609,32 @@ const goDetail = (item) => {
 .dim-score { font-size: 28px; font-weight: 800; }
 .dim-max { font-size: 13px; color: #9ca3af; }
 .dim-detail { font-size: 12px; color: #6b7280; margin-top: 6px; }
+
+/* ===== AI 日报 ===== */
+.daily-report-section {
+  background: white; border-radius: 16px; padding: 24px 28px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.04);
+  margin-bottom: 24px;
+}
+.report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.report-header h3 { margin: 0; font-size: 17px; color: #1a1a2e; }
+.report-time { font-size: 12px; color: #9ca3af; }
+.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.report-card { background: #f9fafb; border-radius: 12px; padding: 18px; }
+.report-card-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+.report-card-body { font-size: 13px; }
+.overview-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+.overview-item:last-child { border-bottom: none; }
+.ov-label { color: #6b7280; }
+.ov-value { font-weight: 600; color: #1a1a2e; }
+.ov-warn { color: #ef4444; }
+.alert-item { display: flex; gap: 6px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; line-height: 1.5; }
+.alert-item:last-child { border-bottom: none; }
+.alert-icon { flex-shrink: 0; }
+.sug-item { display: flex; gap: 6px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; line-height: 1.5; }
+.sug-item:last-child { border-bottom: none; }
+.sug-dot { flex-shrink: 0; }
+.report-empty { text-align: center; color: #9ca3af; padding: 20px 0; font-size: 13px; }
 
 /* ===== 统计卡片 ===== */
 .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 24px; }
