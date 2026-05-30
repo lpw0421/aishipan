@@ -1062,6 +1062,78 @@ app.get('/api/dashboard/stats', (req, res) => {
   })
 })
 
+// 健康指数评分
+app.get('/api/dashboard/health-score', (req, res) => {
+  const userId = req.query.user_id
+  if (!userId) return res.status(400).json({ message: '缺少用户标识' })
+
+  // 1. 资质合规 (权重 25%)
+  const certs = db.prepare('SELECT expiry_date, is_permanent FROM certificates WHERE user_id = ?').all(userId)
+  const certTotal = certs.length
+  const certValid = certs.filter(c => getStatus(c.expiry_date, c.is_permanent) === 'valid').length
+  const certScore = certTotal > 0 ? Math.round((certValid / certTotal) * 100) : 100
+
+  // 2. 人员健康 (权重 20%)
+  const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ?').all(userId)
+  const healthTotal = healths.length
+  const healthValid = healths.filter(h => getStatus(h.expiry_date) === 'valid').length
+  const healthScore = healthTotal > 0 ? Math.round((healthValid / healthTotal) * 100) : 100
+
+  // 3. 原料安全 (权重 25%)
+  const reports = db.prepare("SELECT conclusion FROM product_reports WHERE user_id = ?").all(userId)
+  const reportTotal = reports.length
+  const reportQualified = reports.filter(r => r.conclusion === '合格').length
+  const materialScore = reportTotal > 0 ? Math.round((reportQualified / reportTotal) * 100) : 100
+
+  // 4. 虫害控制 (权重 15%) — 近30天无异常发现计满分
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const dateStr = thirtyDaysAgo.toISOString().slice(0, 10)
+  const pestFindings = db.prepare(
+    "SELECT COUNT(*) AS cnt FROM pest_inspections WHERE user_id = ? AND inspection_date >= ? AND findings_type != '' AND findings_type IS NOT NULL"
+  ).get(userId, dateStr).cnt
+  const pestScore = Math.max(60, 100 - pestFindings * 5) // 每次异常扣5分，保底60
+
+  // 5. 设备校准 (权重 15%)
+  const devices = db.prepare('SELECT calibration_status FROM calibration_devices WHERE user_id = ?').all(userId)
+  const deviceTotal = devices.length
+  const deviceNormal = devices.filter(d => d.calibration_status === '正常').length
+  const calibScore = deviceTotal > 0 ? Math.round((deviceNormal / deviceTotal) * 100) : 100
+
+  // 综合评分
+  const weights = { cert: 25, health: 20, material: 25, pest: 15, calib: 15 }
+  const totalScore = Math.round(
+    (certScore * weights.cert + healthScore * weights.health + materialScore * weights.material +
+     pestScore * weights.pest + calibScore * weights.calib) / 100
+  )
+
+  // 等级
+  const getLevel = (s) => {
+    if (s >= 90) return { level: '优秀', color: '#16a34a' }
+    if (s >= 75) return { level: '良好', color: '#2563eb' }
+    if (s >= 60) return { level: '关注', color: '#ea580c' }
+    return { level: '警告', color: '#dc2626' }
+  }
+
+  res.json({
+    total_score: totalScore,
+    ...getLevel(totalScore),
+    trend: 0, // TODO: 后续接入历史对比
+    dimensions: [
+      { key: 'cert', name: '资质合规', score: certScore, max: 100, weight: 25,
+        detail: `有效 ${certValid}/${certTotal}`, route: '/credentials' },
+      { key: 'health', name: '人员健康', score: healthScore, max: 100, weight: 20,
+        detail: `有效 ${healthValid}/${healthTotal}`, route: '/personnel/health' },
+      { key: 'material', name: '原料安全', score: materialScore, max: 100, weight: 25,
+        detail: `合格 ${reportQualified}/${reportTotal}`, route: '/raw-material/product-standards' },
+      { key: 'pest', name: '虫害控制', score: pestScore, max: 100, weight: 15,
+        detail: pestFindings > 0 ? `近30天 ${pestFindings} 次异常` : '近30天无异常', route: '/third-party/pest' },
+      { key: 'calib', name: '设备校准', score: calibScore, max: 100, weight: 15,
+        detail: `正常 ${deviceNormal}/${deviceTotal}`, route: '/third-party/calibration' }
+    ]
+  })
+})
+
 // ===== 健康证管理接口 =====
 
 // 获取健康证列表（支持按姓名/部门搜索）

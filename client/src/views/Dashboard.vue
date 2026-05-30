@@ -14,6 +14,55 @@
       </div>
     </div>
 
+    <!-- ===== 食安健康指数仪表盘 ===== -->
+    <div class="health-score-section" v-if="healthScore">
+      <div class="health-main">
+        <div class="health-gauge">
+          <svg viewBox="0 0 200 200" class="gauge-svg">
+            <circle cx="100" cy="100" r="88" fill="none" stroke="#e5e7eb" stroke-width="14"/>
+            <circle cx="100" cy="100" r="88" fill="none" :stroke="healthScore.color" stroke-width="14"
+              stroke-linecap="round" :stroke-dasharray="dashArray" stroke-dashoffset="0"
+              transform="rotate(-90 100 100)" style="transition: stroke-dasharray 1s ease"/>
+            <text x="100" y="90" text-anchor="middle" class="gauge-score" :fill="healthScore.color">{{ healthScore.total_score }}</text>
+            <text x="100" y="118" text-anchor="middle" class="gauge-label">/ 100</text>
+          </svg>
+        </div>
+        <div class="health-info">
+          <div class="health-level">
+            <span class="level-badge" :style="{background: healthScore.color}">{{ healthScore.level }}</span>
+            <span class="level-desc">{{ levelDesc }}</span>
+          </div>
+          <div class="health-trend" v-if="healthScore.trend !== 0">
+            <span :class="healthScore.trend > 0 ? 'trend-up' : 'trend-down'">
+              {{ healthScore.trend > 0 ? '📈' : '📉' }} {{ Math.abs(healthScore.trend) > 0 ? (healthScore.trend > 0 ? '+' : '') + healthScore.trend : '' }}
+            </span>
+            <span class="trend-label">较上周</span>
+          </div>
+          <div class="health-trend" v-else>
+            <span class="trend-flat">📊 首次评估</span>
+          </div>
+        </div>
+      </div>
+      <div class="health-dims">
+        <div class="dim-card" v-for="dim in healthScore.dimensions" :key="dim.key"
+          @click="dim.route ? router.push(dim.route) : null">
+          <div class="dim-header">
+            <span class="dim-name">{{ dim.name }}</span>
+            <span class="dim-weight">{{ dim.weight }}%</span>
+          </div>
+          <div class="dim-score-row">
+            <span class="dim-score" :style="{color: dimColor(dim.score)}">{{ dim.score }}</span>
+            <span class="dim-max">/ {{ dim.max }}</span>
+          </div>
+          <el-progress :percentage="dim.score" :stroke-width="8" :color="dimColor(dim.score)" :show-text="false" />
+          <div class="dim-detail">{{ dim.detail }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="health-loading" v-else-if="healthLoading">
+      <div class="spinner"></div>
+    </div>
+
     <!-- ===== 统计卡片 ===== -->
     <div class="stats-grid">
       <div class="stat-card" v-for="card in statCards" :key="card.label" @click="card.onClick ? card.onClick() : null">
@@ -228,6 +277,8 @@ const stats = reactive({
 })
 
 const warnings = ref([])
+const healthScore = ref(null)
+const healthLoading = ref(false)
 
 // ===== 统计卡片 =====
 const statCards = computed(() => [
@@ -313,6 +364,38 @@ const chartBars = computed(() => {
   }))
 })
 
+// ===== 健康指数相关 =====
+const dashArray = computed(() => {
+  if (!healthScore.value) return '0 553'
+  const len = (healthScore.value.total_score / 100) * 553
+  return `${len} 553`
+})
+
+const levelDesc = computed(() => {
+  if (!healthScore.value) return ''
+  const map = { '优秀': '食安体系运行良好', '良好': '有少量需关注项', '关注': '存在风险项，建议处理', '警告': '存在严重问题，需立即处理' }
+  return map[healthScore.value.level] || ''
+})
+
+const dimColor = (score) => {
+  if (score >= 90) return '#16a34a'
+  if (score >= 75) return '#2563eb'
+  if (score >= 60) return '#ea580c'
+  return '#dc2626'
+}
+
+const fetchHealthScore = async () => {
+  healthLoading.value = true
+  try {
+    const res = await request.get('/dashboard/health-score', { params: { user_id: userId } })
+    healthScore.value = res
+  } catch {
+    // ignore
+  } finally {
+    healthLoading.value = false
+  }
+}
+
 // ===== 类型标签映射 =====
 const getTypeLabel = (type) => {
   const map = {
@@ -352,6 +435,7 @@ onMounted(() => {
   updateTime()
   timeTimer = setInterval(updateTime, 1000)
   fetchStats()
+  fetchHealthScore()
 })
 
 onUnmounted(() => {
@@ -439,6 +523,41 @@ const goDetail = (item) => {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
 }
+
+/* ===== 健康指数仪表盘 ===== */
+.health-score-section {
+  background: white; border-radius: 16px; padding: 28px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.04);
+  margin-bottom: 24px;
+}
+.health-loading { display: flex; justify-content: center; padding: 60px; margin-bottom: 24px; background: white; border-radius: 16px; }
+.health-main { display: flex; align-items: center; gap: 40px; margin-bottom: 28px; }
+.health-gauge { flex-shrink: 0; }
+.gauge-svg { width: 180px; height: 180px; }
+.gauge-score { font-size: 42px; font-weight: 800; }
+.gauge-label { font-size: 14px; fill: #9ca3af; }
+.health-info { flex: 1; }
+.health-level { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.level-badge { padding: 6px 20px; border-radius: 20px; color: white; font-size: 16px; font-weight: 700; }
+.level-desc { font-size: 14px; color: #6b7280; }
+.health-trend { font-size: 14px; color: #9ca3af; }
+.trend-up { color: #16a34a; font-weight: 600; }
+.trend-down { color: #dc2626; font-weight: 600; }
+.trend-flat { color: #9ca3af; }
+.trend-label { margin-left: 4px; }
+.health-dims { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.dim-card {
+  padding: 16px; border-radius: 12px; background: #f9fafb;
+  cursor: pointer; transition: all 0.2s; border: 1px solid transparent;
+}
+.dim-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.06); border-color: #d1d5db; }
+.dim-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.dim-name { font-size: 13px; font-weight: 600; color: #374151; }
+.dim-weight { font-size: 11px; color: #9ca3af; background: #e5e7eb; padding: 1px 8px; border-radius: 8px; }
+.dim-score-row { display: flex; align-items: baseline; gap: 2px; margin-bottom: 8px; }
+.dim-score { font-size: 28px; font-weight: 800; }
+.dim-max { font-size: 13px; color: #9ca3af; }
+.dim-detail { font-size: 12px; color: #6b7280; margin-top: 6px; }
 
 /* ===== 统计卡片 ===== */
 .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 24px; }
