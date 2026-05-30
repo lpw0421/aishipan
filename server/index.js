@@ -1846,6 +1846,16 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
   const text = aiData.choices?.[0]?.message?.content || ''
   const json = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, ''))
 
+  // 归一化：确保每个维度分数不超过 max
+  if (json.dimensions) {
+    json.dimensions.forEach(d => {
+      d.score = Math.min(Math.max(0, Math.round(d.score)), d.max)
+    })
+    // 重新计算综合分
+    const totalWeight = json.dimensions.reduce((s, d) => s + d.weight, 0)
+    json.total_score = Math.round(json.dimensions.reduce((s, d) => s + (d.score / d.max) * d.weight, 0) / totalWeight * 100)
+  }
+
   res.json({ method: 'ai', ...json, supplier_data: supplierData })
   } catch (e) {
     console.error('[supplier-score] 错误:', e.message)
