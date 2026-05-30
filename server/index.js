@@ -1806,26 +1806,25 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
 4. 经营异常：判断是否存在经营异常风险（如证照大量过期=经营异常信号）
 5. 食安管控：基于证照管理规范性、产品报告完整性评估食安体系有效性
 
-## 评分规则
-- 每个维度0-100分，综合=加权平均
-- 任一维度<60 → 综合高风险
-- 3个及以上维度<75 → 综合高风险
-- 1-2个维度<75 → 中风险
-- 全部>=75 → 低风险
+## 评分规则（非常重要）
+- 每个维度打0-100分，分数越高=合规越好
+- 综合分 = 资质*0.25 + 处罚*0.25 + 抽检*0.25 + 异常*0.15 + 管控*0.10
+- 等级判定：>=75低风险，60-74中风险，<60高风险
+- 任一维度<60 → 最高综合为中风险
 
 ## 返回JSON格式
 {
-  "total_score": 数字,
+  "total_score": 数字(0-100),
   "level": "低风险|中风险|高风险",
   "summary": "综合评估摘要（2-3句话）",
   "dimensions": [
-    {"name":"资质合规性","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":["发现1","发现2"],"suggestion":"建议"},
-    {"name":"行政处罚","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":["发现或说明"],"suggestion":"建议"},
-    {"name":"产品抽检","score":数字,"max":25,"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
-    {"name":"经营异常","score":数字,"max":15,"weight":15,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
-    {"name":"食安管控","score":数字,"max":10,"weight":10,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"}
+    {"name":"资质合规性","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":["发现1"],"suggestion":"建议"},
+    {"name":"行政处罚","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
+    {"name":"产品抽检","score":数字(0-100),"weight":25,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
+    {"name":"经营异常","score":数字(0-100),"weight":15,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"},
+    {"name":"食安管控","score":数字(0-100),"weight":10,"level":"低风险|中风险|高风险","findings":[],"suggestion":"建议"}
   ],
-  "risk_tips": ["风险提示1","风险提示2"],
+  "risk_tips": ["风险提示"],
   "disclaimer": "本报告基于系统数据库记录和AI分析生成。行政处罚、经营异常等信息因未经在线实时核验，可能存在遗漏，建议人工补充核实。"
 }`
 
@@ -1846,14 +1845,13 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
   const text = aiData.choices?.[0]?.message?.content || ''
   const json = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, ''))
 
-  // 归一化：确保每个维度分数不超过 max
+  // 归一化：每个维度0-100分，clamp到有效范围，再算加权综合
   if (json.dimensions) {
     json.dimensions.forEach(d => {
-      d.score = Math.min(Math.max(0, Math.round(d.score)), d.max)
+      d.score = Math.min(100, Math.max(0, Math.round(d.score)))
     })
-    // 重新计算综合分
-    const totalWeight = json.dimensions.reduce((s, d) => s + d.weight, 0)
-    json.total_score = Math.round(json.dimensions.reduce((s, d) => s + (d.score / d.max) * d.weight, 0) / totalWeight * 100)
+    const weights = { '资质合规性': 25, '行政处罚': 25, '产品抽检': 25, '经营异常': 15, '食安管控': 10 }
+    json.total_score = Math.round(json.dimensions.reduce((s, d) => s + d.score * (weights[d.name] || 20), 0) / 100)
   }
 
   res.json({ method: 'ai', ...json, supplier_data: supplierData })

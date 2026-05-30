@@ -70,10 +70,10 @@
             <div class="dim-card" v-for="dim in result.dimensions" :key="dim.name" :class="'dim-' + dim.level">
               <div class="dim-top">
                 <span class="dim-name">{{ dim.name }}</span>
-                <span class="dim-score" :style="{color: dimColor(dim.score, dim.max)}">{{ dim.score }}<small>/{{ dim.max }}</small></span>
+                <span class="dim-score" :style="{color: dimColor(dim.score)}">{{ dim.score }}<small>分</small></span>
                 <el-tag :type="dim.level==='高风险'?'danger':dim.level==='中风险'?'warning':'success'" size="small">{{ dim.level }}</el-tag>
               </div>
-              <el-progress :percentage="Math.round(dim.score/dim.max*100)" :stroke-width="6" :color="dimColor(dim.score, dim.max)" :show-text="false" />
+              <el-progress :percentage="dim.score" :stroke-width="6" :color="dimColor(dim.score)" :show-text="false" />
               <div class="dim-findings" v-if="dim.findings && dim.findings.length">
                 <div class="finding" v-for="(f, i) in dim.findings" :key="i">• {{ f }}</div>
               </div>
@@ -118,10 +118,9 @@ const scoreColor = computed(() => {
   return '#f56c6c'
 })
 
-const dimColor = (score, max) => {
-  const pct = score / max
-  if (pct >= 0.75) return '#67c23a'
-  if (pct >= 0.6) return '#e6a23c'
+const dimColor = (score) => {
+  if (score >= 75) return '#67c23a'
+  if (score >= 60) return '#e6a23c'
   return '#f56c6c'
 }
 
