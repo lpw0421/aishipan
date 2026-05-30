@@ -1789,34 +1789,59 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
     })
   }
 
-  // ===== 联网搜索（中国可访问引擎） =====
+  // ===== 联网搜索（中国可访问引擎：360搜索 + Bing中国） =====
   let webInfo = ''
   const searchEngines = [
     {
-      name: 'DuckDuckGo',
-      url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`,
+      name: '360搜索',
+      url: (q) => `https://www.so.com/s?q=${encodeURIComponent(q)}`,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)' },
       parse: (html) => {
-        const links = []
-        const re = /<a[^>]*href="([^"]+)"[^>]*class="result-link"[^>]*>([^<]+)<\/a>/gi
-        let m; while ((m = re.exec(html)) !== null) links.push({ title: m[2].trim(), url: m[1] })
         const snips = []
-        const re2 = /<td class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi
-        let m2; while ((m2 = re2.exec(html)) !== null) snips.push(m2[1].replace(/<[^>]+>/g, '').trim())
-        return { links: links.slice(0, 8), snippets: snips.slice(0, 8) }
+        // 360搜索使用 res-title / res-desc
+        const titleRe = /<h3[^>]*class="res-title"[^>]*>([\s\S]*?)<\/h3>/gi
+        const descRe = /<p[^>]*class="res-desc"[^>]*>([\s\S]*?)<\/p>/gi
+        const citeRe = /<cite[^>]*>([\s\S]*?)<\/cite>/gi
+        let m
+        while ((m = titleRe.exec(html)) !== null) snips.push('📌 ' + m[1].replace(/<[^>]+>/g, '').trim())
+        while ((m = descRe.exec(html)) !== null) {
+          const t = m[1].replace(/<[^>]+>/g, '').trim()
+          if (t.length > 15) snips.push(t)
+        }
+        while ((m = citeRe.exec(html)) !== null) snips.push('🔗 ' + m[1].replace(/<[^>]+>/g, '').trim())
+        return snips.slice(0, 12)
       }
     },
     {
-      name: 'Bing',
-      url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
+      name: 'Bing中国',
+      url: (q) => `https://cn.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-Hans`,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       parse: (html) => {
         const snips = []
-        const re = /<p[^>]*class="b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/gi
-        let m; while ((m = re.exec(html)) !== null) {
-          const t = m[1].replace(/<[^>]+>/g, '').trim()
-          if (t.length > 10) snips.push(t)
+        // Bing 使用 h2 标题 + p 描述
+        const capRe = /<div class="b_caption"[^>]*>([\s\S]*?)<\/div>\s*<\/li>/gi
+        let m
+        while ((m = capRe.exec(html)) !== null) {
+          const text = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          if (text.length > 15) snips.push(text.substring(0, 300))
         }
-        return { links: [], snippets: snips.slice(0, 8) }
+        return snips.slice(0, 8)
+      }
+    },
+    {
+      name: '搜狗',
+      url: (q) => `https://m.sogou.com/web/searchList.jsp?keyword=${encodeURIComponent(q)}`,
+      headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)' },
+      parse: (html) => {
+        const snips = []
+        // 搜狗移动版
+        const re = /<div class="vrwrap"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi
+        let m
+        while ((m = re.exec(html)) !== null) {
+          const t = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          if (t.length > 15) snips.push(t.substring(0, 300))
+        }
+        return snips.slice(0, 8)
       }
     }
   ]
@@ -1836,15 +1861,16 @@ app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
         const res = await fetch(engine.url(query), opts)
         if (res.ok) {
           const html = await res.text()
-          const parsed = engine.parse(html)
-          if (parsed.snippets.length > 0) {
-            webInfo += `\n### ${engine.name}搜索: "${query}"\n`
-            parsed.snippets.forEach(s => { webInfo += `- ${s}\n` })
+          const results = engine.parse(html)
+          const items = Array.isArray(results) ? results : (results.snippets || [])
+          if (items.length > 0) {
+            webInfo += `\n### ${engine.name}: "${query}"\n`
+            items.forEach(s => { webInfo += `- ${s}\n` })
           }
           break // 成功就跳出引擎循环
         }
       } catch (e) {
-        console.log(`[search] ${engine.name} '${query}' 失败:`, e.message)
+        // 引擎不可用，尝试下一个
       }
     }
   }
