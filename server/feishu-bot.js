@@ -117,7 +117,7 @@ async function saveCertFromText(senderOpenId, text) {
 
     db.prepare(`INSERT INTO certificates (user_id, name, expiry_date, is_permanent, category, company_name, product_name, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'valid')`)
-      .run(userId, info.name, info.expiry_date || '', info.is_permanent ? 1 : 0,
+      .run(userId, info.name, info.expiry_date || '2099-12-31', info.is_permanent ? 1 : 0,
         info.category || 'supplier', info.company_name, info.product_name || '')
 
     return `✅ 证照已录入: ${info.company_name} - ${info.name}` + (info.expiry_date ? ` (${info.expiry_date}到期)` : '')
@@ -153,7 +153,7 @@ async function savePersonFromText(senderOpenId, text) {
 
     // 同步加健康证记录
     if (info.health_cert_expiry) {
-      db.prepare('INSERT INTO health_certs (user_id, employee_name, expiry_date) VALUES (?, ?, ?)')
+      db.prepare('INSERT INTO health_certs (user_id, employee_name, issue_date, expiry_date) VALUES (?, ?, date(), ?)')
         .run(userId, info.name, info.health_cert_expiry)
     }
 
@@ -181,6 +181,83 @@ async function quickQuery(senderOpenId, query) {
 
     return '可查询: "到期" "临期" "客诉"。如需详细报告请登录网页查看。'
   } catch (e) { return '查询失败: ' + e.message }
+}
+
+// 自然语言意图识别
+function detectIntent(text) {
+  const t = text.replace(/^[\/\s]+/, '')
+  if (/^(录入|添加|新增|记).*(证照|资质|证书|许可|报告)/.test(t)) return 'cert'
+  if (/^(录入|添加|新增|记).*(人员|员工|健康证|人$)/.test(t)) return 'person'
+  if (/^(查|看).*(到期|临期|过期|预警)/.test(t)) return 'warn'
+  if (/^(查|看).*(客诉|投诉)/.test(t)) return 'complaint'
+  if (/^(日报|周报|月报|看板|概览|总结)/.test(t)) return 'summary'
+  if (/^(帮助|help|菜单|功能)/.test(t)) return 'help'
+  if (/^\/录入证照|^\/添加证照|^\/新增证照|录入证照|添加证照/.test(text)) return 'cert'
+  if (/^\/录入人员|^\/添加人员|^\/新增人员|录入人员|添加人员/.test(text)) return 'person'
+  if (/^\/查|^\/查询/.test(text)) return 'query'
+  if (/^\/帮助|^\/help|^\/菜单/.test(text)) return 'help'
+  if (/^\/日报|^\/周报|^\/月报|^\/看板/.test(text)) return 'summary'
+  return 'chat'
+}
+
+// 发送消息卡片（快捷菜单）
+async function sendCard(msgId, title, items) {
+  const token = await getTenantToken()
+  const elements = items.map((item, i) => ({
+    tag: 'action',
+    actions: [{
+      tag: 'button', text: { tag: 'lark_md', content: item.label },
+      value: item.value || item.label, type: 'default'
+    }]
+  }))
+  return fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${msgId}/reply`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      msg_type: 'interactive',
+      content: JSON.stringify({
+        header: { title: { tag: 'plain_text', content: title }, template: 'blue' },
+        elements
+      })
+    })
+  })
+}
+
+// 处理卡片按钮回调
+async function handleCardAction(msgId, actionValue) {
+  if (actionValue === 'menu') return sendCard(msgId, '🤖 AI食安助手', [
+    { label: '📝 录入证照', value: 'cert_input' },
+    { label: '👤 录入人员', value: 'person_input' },
+    { label: '🔍 查看预警', value: 'warn' },
+    { label: '📊 今日概览', value: 'summary' },
+    { label: '❓ 使用帮助', value: 'help' }
+  ])
+  if (actionValue === 'cert_input') return sendReply(msgId, '请描述证照信息，例如：\n录入证照 XX食品有限公司 营业执照 2026-12-31到期')
+  if (actionValue === 'person_input') return sendReply(msgId, '请描述人员信息，例如：\n录入人员 张三 品控部质检员 健康证2026-08-31到期')
+  if (actionValue === 'warn') {
+    const db = mainDb
+    const warnings = db.prepare("SELECT name, company_name, expiry_date FROM certificates WHERE user_id = 1 AND expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') ORDER BY expiry_date LIMIT 5").all()
+    if (!warnings.length) return sendReply(msgId, '👍 30天内无到期证照')
+    return sendReply(msgId, '📋 近期到期:\n' + warnings.map(w => `• ${w.company_name} ${w.name} ${w.expiry_date}`).join('\n'))
+  }
+  if (actionValue === 'help') return sendReply(msgId,
+    '📱 AI食安飞书助手\n\n' +
+    '🗣️ 直接说话就能录入：\n' +
+    '  "录入证照 XX公司 营业执照"\n' +
+    '  "张三 品控部 健康证8月到期"\n\n' +
+    '🔍 快捷查询：\n' +
+    '  "查看预警" / "查客诉"\n' +
+    '  "今日概览" / "周报"\n\n' +
+    '发送"菜单"随时呼出快捷卡片'
+  )
+  if (actionValue === 'summary') {
+    try {
+      const res = await fetch(`http://127.0.0.1:3001/api/dashboard/report?user_id=1&period=day`)
+      const data = await res.json()
+      return sendReply(msgId, `📊 ${data.label}概览\n${data.overview.map(o => `• ${o.label}: ${o.value}`).join('\n')}`)
+    } catch { return sendReply(msgId, '获取失败，请稍后重试') }
+  }
+  return sendReply(msgId, '未知操作')
 }
 
 // AI 对话
@@ -218,6 +295,17 @@ module.exports = async function feishuWebhook(req, res) {
     return res.json({ challenge: body.challenge })
   }
 
+  // 卡片按钮回调
+  if (body.header?.event_type === 'card.action.trigger') {
+    res.json({ code: 0 })
+    const actionValue = body.action?.value || body.action?.tag
+    if (actionValue) {
+      const msgId = body.open_message_id || ''
+      await handleCardAction(msgId, actionValue)
+    }
+    return
+  }
+
   // 消息事件
   if (body.header?.event_type === 'im.message.receive_v1') {
     res.json({ code: 0 }) // 立即返回 200，避免飞书重试
@@ -240,38 +328,33 @@ module.exports = async function feishuWebhook(req, res) {
 
       const senderOpenId = event.sender?.open_id || ''
 
-      // 优先检查管理命令
-      const isAdmin = await handleAdminCommand(msg.message_id, senderOpenId, userText)
-      if (isAdmin) return
+      // 管理命令
+      if (await handleAdminCommand(msg.message_id, senderOpenId, userText)) return
 
-      // 数据录入命令
-      if (userText.startsWith('/录入证照') || userText.startsWith('/添加证照') || userText.startsWith('/新增证照')) {
-        const text = userText.replace(/^\/(录入|添加|新增)证照\s*/, '')
-        const reply = await saveCertFromText(senderOpenId, text)
-        await sendReply(msg.message_id, reply); return
-      }
-      if (userText.startsWith('/录入人员') || userText.startsWith('/添加人员') || userText.startsWith('/新增人员')) {
-        const text = userText.replace(/^\/(录入|添加|新增)人员\s*/, '')
-        const reply = await savePersonFromText(senderOpenId, text)
-        await sendReply(msg.message_id, reply); return
-      }
-      // 快捷查询
-      if (userText.startsWith('/查') || userText.startsWith('/查询')) {
-        const query = userText.replace(/^\/(查|查询)\s*/, '')
-        const reply = await quickQuery(senderOpenId, query)
-        await sendReply(msg.message_id, reply); return
-      }
-      // 帮助
-      if (userText === '/帮助' || userText === '/help') {
-        await sendReply(msg.message_id,
-          '🤖 AI食安助手命令:\n\n' +
-          '📝 录入证照: /录入证照 公司名，证照名称，到期日\n' +
-          '👤 录入人员: /录入人员 姓名，部门职位，健康证到期\n' +
-          '🔍 快捷查询: /查 到期 | /查 客诉\n' +
-          '💬 AI对话: 直接发消息即可'
-        ); return
-      }
+      // 智能意图识别
+      const intent = detectIntent(userText)
 
+      if (intent === 'cert') {
+        const text = userText.replace(/^[\/\s]*(录入|添加|新增)\s*证照\s*/, '').replace(/^(录入|添加|新增|记)\s*/, '')
+        return await sendReply(msg.message_id, await saveCertFromText(senderOpenId, text))
+      }
+      if (intent === 'person') {
+        const text = userText.replace(/^[\/\s]*(录入|添加|新增)\s*人员\s*/, '').replace(/^(录入|添加|新增|记)\s*/, '')
+        return await sendReply(msg.message_id, await savePersonFromText(senderOpenId, text))
+      }
+      if (intent === 'warn') return await sendReply(msg.message_id, await quickQuery(senderOpenId, '到期'))
+      if (intent === 'complaint') return await sendReply(msg.message_id, await quickQuery(senderOpenId, '客诉'))
+      if (intent === 'summary') {
+        try {
+          const period = userText.includes('周') ? 'week' : userText.includes('月') ? 'month' : 'day'
+          const res = await fetch(`http://127.0.0.1:3001/api/dashboard/report?user_id=1&period=${period}`)
+          const data = await res.json()
+          return await sendReply(msg.message_id, `📊 ${data.label}概览\n${data.overview.map(o => `• ${o.label}: ${o.value}`).join('\n')}`)
+        } catch { return await sendReply(msg.message_id, '获取失败') }
+      }
+      if (intent === 'help' || userText === '菜单') return await handleCardAction(msg.message_id, 'menu')
+
+      // 默认 AI 对话
       const reply = await aiChat(userText)
       await sendReply(msg.message_id, reply)
     } catch (e) {
