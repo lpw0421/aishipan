@@ -63,16 +63,24 @@
       <div class="spinner"></div>
     </div>
 
-    <!-- ===== AI 智能日报 ===== -->
+    <!-- ===== AI 智能报告 ===== -->
     <div class="daily-report-section" v-if="dailyReport">
       <div class="report-header">
-        <h3>🤖 AI 智能日报</h3>
+        <div class="report-header-left">
+          <h3>🤖 AI 智能报告</h3>
+          <el-radio-group v-model="reportPeriod" size="small" @change="switchPeriod">
+            <el-radio-button value="day">日报</el-radio-button>
+            <el-radio-button value="week">周报</el-radio-button>
+            <el-radio-button value="month">月报</el-radio-button>
+          </el-radio-group>
+        </div>
         <span class="report-time">{{ dailyReport.generated_at }}</span>
       </div>
+      <div class="report-stats-note" v-if="dailyReport.stats_note">{{ dailyReport.stats_note }}</div>
       <div class="report-grid">
-        <!-- 今日概览 -->
+        <!-- 概览 -->
         <div class="report-card">
-          <div class="report-card-title">📊 今日概览</div>
+          <div class="report-card-title">📊 {{ dailyReport.label }}概览</div>
           <div class="report-card-body">
             <div class="overview-item" v-for="item in dailyReport.overview" :key="item.label">
               <span class="ov-label">{{ item.label }}</span>
@@ -322,6 +330,7 @@ const warnings = ref([])
 const healthScore = ref(null)
 const healthLoading = ref(false)
 const dailyReport = ref(null)
+const reportPeriod = ref('day')
 
 // ===== 统计卡片 =====
 const statCards = computed(() => [
@@ -474,12 +483,14 @@ const fetchStats = async () => {
   }
 }
 
-const fetchDailyReport = async () => {
+const fetchDailyReport = async (period = 'day') => {
   try {
-    const res = await request.get('/dashboard/daily-report', { params: { user_id: userId } })
+    const res = await request.get('/dashboard/report', { params: { user_id: userId, period } })
     dailyReport.value = res
   } catch { /* ignore */ }
 }
+
+const switchPeriod = (p) => { fetchDailyReport(p) }
 
 onMounted(() => {
   updateTime()
@@ -616,9 +627,11 @@ const goDetail = (item) => {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.04);
   margin-bottom: 24px;
 }
-.report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.report-header-left { display: flex; align-items: center; gap: 16px; }
 .report-header h3 { margin: 0; font-size: 17px; color: #1a1a2e; }
 .report-time { font-size: 12px; color: #9ca3af; }
+.report-stats-note { font-size: 12px; color: #9ca3af; margin-bottom: 14px; padding: 4px 10px; background: #f0f5ff; border-radius: 4px; display: inline-block; }
 .report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .report-card { background: #f9fafb; border-radius: 12px; padding: 18px; }
 .report-card-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 12px; }
