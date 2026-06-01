@@ -313,12 +313,14 @@ module.exports = async function feishuWebhook(req, res) {
     try {
       const event = body.event
       const msg = event.message
+      let userText = ''
       if (msg.message_type === 'audio') {
         try {
           const audioContent = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
           const fileKey = audioContent.file_key
           if (fileKey) {
             const token = await getTenantToken()
+            // 1) 下载音频
             const audioRes = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${msg.message_id}/resources/${fileKey}?type=file`, {
               headers: { 'Authorization': `Bearer ${token}` }
             })
@@ -326,32 +328,44 @@ module.exports = async function feishuWebhook(req, res) {
               const audioBuf = Buffer.from(await audioRes.arrayBuffer())
               const { execSync } = require('child_process')
               const fs = require('fs')
-              const tmpIn = '/tmp/feishu_audio_' + Date.now() + '.opus'
-              const tmpOut = '/tmp/feishu_audio_' + Date.now() + '.wav'
+              const tmpIn = '/tmp/feishu_audio_' + Date.now()
+              const tmpWav = tmpIn + '.wav'
               fs.writeFileSync(tmpIn, audioBuf)
-              // OPUS → 16kHz mono PCM WAV
-              execSync(`ffmpeg -y -i ${tmpIn} -acodec pcm_s16le -ac 1 -ar 16000 ${tmpOut} 2>/dev/null`)
-              const wavBuf = fs.readFileSync(tmpOut)
-              fs.unlinkSync(tmpIn); fs.unlinkSync(tmpOut)
-              // 飞书语音识别
-              const sttRes = await fetch('https://open.feishu.cn/open-apis/speech_to_text/v1/speech/recognize', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  speech: { content: wavBuf.toString('base64') },
-                  config: { engine_type: '16k_auto', format: 'wav', enable_punctuation: true }
-                })
+              // 转码为16k mono WAV
+              execSync(`ffmpeg -y -i ${tmpIn} -acodec pcm_s16le -ac 1 -ar 16000 ${tmpWav} 2>/dev/null`)
+              // 2) 上传WAV到飞书获取file_id
+              const FormData = require('form-data')
+              const form = new FormData()
+              form.append('file', fs.createReadStream(tmpWav))
+              form.append('file_name', 'audio.wav')
+              const uploadRes = await fetch('https://open.feishu.cn/open-apis/im/v1/files', {
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form
               })
-              if (sttRes.ok) {
-                const sttData = await sttRes.json()
-                if (sttData.data?.text) userText = sttData.data.text
-                console.log('[语音识别]', userText || '未识别到文字')
+              let fileId = ''
+              if (uploadRes.ok) {
+                const upData = await uploadRes.json()
+                fileId = upData.data?.file_key || ''
               }
+              fs.unlinkSync(tmpIn); fs.unlinkSync(tmpWav)
+              console.log('[语音] 上传file_id:', fileId || '失败')
+              // 3) 语音识别
+              if (fileId) {
+                const sttRes = await fetch('https://open.feishu.cn/open-apis/speech_to_text/v1/speech/file_recognize', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ speech: { file_id: fileId }, config: { engine_type: '16k_auto', enable_punctuation: true } })
+                })
+                if (sttRes.ok) {
+                  const sttData = await sttRes.json()
+                  userText = sttData.data?.text || ''
+                }
+              }
+              console.log('[语音] 识别:', userText || '(空)')
             }
           }
-        } catch (e) { console.log('[语音] 失败:', e.message) }
+        } catch (e) { console.log('[语音] 异常:', e.message) }
         if (!userText) {
-          await sendReply(msg.message_id, '🎤 语音识别失败，请直接发文字消息')
+          await sendReply(msg.message_id, '🎤 语音识别失败，请重试或发文字')
           return
         }
       }
@@ -365,9 +379,8 @@ module.exports = async function feishuWebhook(req, res) {
         content = msg.content
       }
 
-      let userText = content.text?.trim()
-      if (!userText && msg.message_type === 'audio') userText = '' // 音频后续处理
-      if (!userText && msg.message_type !== 'audio') return
+      if (msg.message_type === 'text') userText = content.text?.trim() || ''
+      if (!userText) return
 
       const senderOpenId = event.sender?.open_id || ''
 
