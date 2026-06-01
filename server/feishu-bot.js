@@ -89,6 +89,111 @@ async function handleAdminCommand(msgId, senderOpenId, text) {
   return true
 }
 
+// ===== 数据录入命令 =====
+const Database = require('better-sqlite3')
+const path = require('path')
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'aishipan.db')
+const getDb = () => {
+  const db = new Database(DB_PATH)
+  db.pragma('journal_mode=WAL')
+  return db
+}
+
+// 从文本提取+保存证照
+async function saveCertFromText(senderOpenId, text) {
+  if (!AI_KEY) return 'AI未配置，无法智能提取'
+  try {
+    // 调用AI提取
+    const aiRes = await fetch(AI_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_KEY },
+      body: JSON.stringify({
+        model: 'deepseek-chat', messages: [
+          { role: 'system', content: '从文本提取证照信息。返回JSON: {"category":"own或supplier","company_name":"企业","product_name":"产品","name":"证照名称","expiry_date":"YYYY-MM-DD","is_permanent":true/false}' },
+          { role: 'user', content: text.substring(0, 300) }
+        ], max_tokens: 200, temperature: 0.1, response_format: { type: 'json_object' }
+      })
+    })
+    const d = await aiRes.json()
+    const info = JSON.parse(d.choices[0].message.content.replace(/```json\n?/g, '').replace(/```/g, ''))
+
+    if (!info.company_name || !info.name) return '未能识别企业名称和证照名称，请重新描述。例如：\n/录入证照 上海汉康食品，营业执照，2026-12-31到期'
+
+    const db = getDb()
+    // 查找用户（优先open_id匹配 → 回退到管理员）
+    let userId = 1
+    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
+    if (user) userId = user.id
+
+    db.prepare(`INSERT INTO certificates (user_id, name, expiry_date, is_permanent, category, company_name, product_name, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'valid')`)
+      .run(userId, info.name, info.expiry_date || '', info.is_permanent ? 1 : 0,
+        info.category || 'supplier', info.company_name, info.product_name || '')
+
+    return `✅ 证照已录入: ${info.company_name} - ${info.name}` + (info.expiry_date ? ` (${info.expiry_date}到期)` : '')
+  } catch (e) { return '录入失败: ' + e.message }
+}
+
+// 从文本提取+保存人员/健康证
+async function savePersonFromText(senderOpenId, text) {
+  if (!AI_KEY) return 'AI未配置，无法智能提取'
+  try {
+    const aiRes = await fetch(AI_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_KEY },
+      body: JSON.stringify({
+        model: 'deepseek-chat', messages: [
+          { role: 'system', content: '从文本提取人员信息。返回JSON: {"name":"姓名","department":"部门","position":"职位","phone":"电话","health_cert_expiry":"健康证到期YYYY-MM-DD","entry_date":"入职日期YYYY-MM-DD"}' },
+          { role: 'user', content: text.substring(0, 300) }
+        ], max_tokens: 200, temperature: 0.1, response_format: { type: 'json_object' }
+      })
+    })
+    const d = await aiRes.json()
+    const info = JSON.parse(d.choices[0].message.content.replace(/```json\n?/g, '').replace(/```/g, ''))
+
+    if (!info.name) return '未能识别姓名，请重新描述。例如：\n/录入人员 张三，品控部质检员，健康证2026-08-31到期'
+
+    const db = getDb()
+    let userId = 1
+    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
+    if (user) userId = user.id
+
+    db.prepare(`INSERT INTO personnel (user_id, name, department, position, phone, health_cert_expiry, entry_date, employee_number, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, '在职')`)
+      .run(userId, info.name, info.department || '', info.position || '', info.phone || '',
+        info.health_cert_expiry || '', info.entry_date || '', 'FEISHU' + Date.now())
+
+    // 同步加健康证记录
+    if (info.health_cert_expiry) {
+      db.prepare('INSERT INTO health_certs (user_id, employee_name, expiry_date) VALUES (?, ?, ?)')
+        .run(user.id, info.name, info.health_cert_expiry)
+    }
+
+    return `✅ 人员已录入: ${info.name}` + (info.department ? ` ${info.department}` : '') + (info.health_cert_expiry ? ` 健康证${info.health_cert_expiry}到期` : '')
+  } catch (e) { return '录入失败: ' + e.message }
+}
+
+// 快捷查询
+async function quickQuery(senderOpenId, query) {
+  try {
+    const db = getDb()
+    let userId = 1
+    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
+    if (user) userId = user.id
+
+    if (query.includes('到期') || query.includes('临期')) {
+      const warnings = db.prepare("SELECT name, company_name, expiry_date FROM certificates WHERE user_id = ? AND expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') ORDER BY expiry_date LIMIT 5").all(userId)
+      if (!warnings.length) return '👍 30天内无到期证照'
+      return '📋 近期到期证照:\n' + warnings.map(w => `• ${w.company_name} ${w.name} ${w.expiry_date}`).join('\n')
+    }
+
+    if (query.includes('客诉') || query.includes('投诉')) {
+      const count = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中')").get(userId).cnt
+      return `📊 待处理客诉: ${count} 件`
+    }
+
+    return '可查询: "到期" "临期" "客诉"。如需详细报告请登录网页查看。'
+  } catch (e) { return '查询失败: ' + e.message }
+}
+
 // AI 对话
 async function aiChat(message) {
   if (!AI_KEY) return 'AI未配置，请在.env中设置AI_API_KEY'
@@ -144,10 +249,39 @@ module.exports = async function feishuWebhook(req, res) {
       const userText = content.text?.trim()
       if (!userText) return
 
-      // 优先检查管理命令
       const senderOpenId = event.sender?.open_id || ''
+
+      // 优先检查管理命令
       const isAdmin = await handleAdminCommand(msg.message_id, senderOpenId, userText)
       if (isAdmin) return
+
+      // 数据录入命令
+      if (userText.startsWith('/录入证照') || userText.startsWith('/添加证照') || userText.startsWith('/新增证照')) {
+        const text = userText.replace(/^\/(录入|添加|新增)证照\s*/, '')
+        const reply = await saveCertFromText(senderOpenId, text)
+        await sendReply(msg.message_id, reply); return
+      }
+      if (userText.startsWith('/录入人员') || userText.startsWith('/添加人员') || userText.startsWith('/新增人员')) {
+        const text = userText.replace(/^\/(录入|添加|新增)人员\s*/, '')
+        const reply = await savePersonFromText(senderOpenId, text)
+        await sendReply(msg.message_id, reply); return
+      }
+      // 快捷查询
+      if (userText.startsWith('/查') || userText.startsWith('/查询')) {
+        const query = userText.replace(/^\/(查|查询)\s*/, '')
+        const reply = await quickQuery(senderOpenId, query)
+        await sendReply(msg.message_id, reply); return
+      }
+      // 帮助
+      if (userText === '/帮助' || userText === '/help') {
+        await sendReply(msg.message_id,
+          '🤖 AI食安助手命令:\n\n' +
+          '📝 录入证照: /录入证照 公司名，证照名称，到期日\n' +
+          '👤 录入人员: /录入人员 姓名，部门职位，健康证到期\n' +
+          '🔍 快捷查询: /查 到期 | /查 客诉\n' +
+          '💬 AI对话: 直接发消息即可'
+        ); return
+      }
 
       const reply = await aiChat(userText)
       await sendReply(msg.message_id, reply)
