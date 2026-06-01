@@ -16,6 +16,14 @@
 
     <!-- ===== 食安健康指数仪表盘 ===== -->
     <div class="health-score-section" v-if="healthScore">
+      <div class="health-head">
+        <h3>🛡️ 食安健康指数</h3>
+        <el-radio-group v-model="healthPeriod" size="small" @change="switchHealthPeriod">
+          <el-radio-button value="day">日</el-radio-button>
+          <el-radio-button value="week">周</el-radio-button>
+          <el-radio-button value="month">月</el-radio-button>
+        </el-radio-group>
+      </div>
       <div class="health-main">
         <div class="health-gauge">
           <svg viewBox="0 0 200 200" class="gauge-svg">
@@ -32,14 +40,17 @@
             <span class="level-badge" :style="{background: healthScore.color}">{{ healthScore.level }}</span>
             <span class="level-desc">{{ levelDesc }}</span>
           </div>
-          <div class="health-trend" v-if="healthScore.trend !== 0">
-            <span :class="healthScore.trend > 0 ? 'trend-up' : 'trend-down'">
-              {{ healthScore.trend > 0 ? '📈' : '📉' }} {{ Math.abs(healthScore.trend) > 0 ? (healthScore.trend > 0 ? '+' : '') + healthScore.trend : '' }}
+          <div class="health-trend" v-if="healthScore.trend_label">
+            <span :class="healthScore.trend > 0 ? 'trend-up' : healthScore.trend < 0 ? 'trend-down' : 'trend-flat'">
+              {{ healthScore.trend > 0 ? '📈 +' + healthScore.trend : healthScore.trend < 0 ? '📉 ' + healthScore.trend : '➡️ 持平' }}
             </span>
-            <span class="trend-label">较上周</span>
+            <span class="trend-label">{{ healthScore.trend_label }}</span>
           </div>
-          <div class="health-trend" v-else>
-            <span class="trend-flat">📊 首次评估</span>
+          <!-- 7天小趋势 -->
+          <div class="mini-sparkline" v-if="healthScore.history && healthScore.history.length >= 2">
+            <span v-for="(h, i) in healthScore.history" :key="i"
+              class="spark-dot" :style="{background: h.total_score >= 90 ? '#16a34a' : h.total_score >= 75 ? '#2563eb' : h.total_score >= 60 ? '#ea580c' : '#dc2626'}"
+              :title="h.snapshot_date + ': ' + h.total_score + '分'"></span>
           </div>
         </div>
       </div>
@@ -53,6 +64,9 @@
           <div class="dim-score-row">
             <span class="dim-score" :style="{color: dimColor(dim.score)}">{{ dim.score }}</span>
             <span class="dim-max">/ {{ dim.max }}</span>
+            <span v-if="dim.trend !== 0" class="dim-trend" :class="dim.trend > 0 ? 'green' : 'red'">
+              {{ dim.trend > 0 ? '↑' : '↓' }}{{ Math.abs(dim.trend) }}
+            </span>
           </div>
           <el-progress :percentage="dim.score" :stroke-width="8" :color="dimColor(dim.score)" :show-text="false" />
           <div class="dim-detail">{{ dim.detail }}</div>
@@ -329,6 +343,7 @@ const stats = reactive({
 const warnings = ref([])
 const healthScore = ref(null)
 const healthLoading = ref(false)
+const healthPeriod = ref('day')
 const dailyReport = ref(null)
 const reportPeriod = ref('day')
 
@@ -436,10 +451,10 @@ const dimColor = (score) => {
   return '#dc2626'
 }
 
-const fetchHealthScore = async () => {
+const fetchHealthScore = async (period = 'day') => {
   healthLoading.value = true
   try {
-    const res = await request.get('/dashboard/health-score', { params: { user_id: userId } })
+    const res = await request.get('/dashboard/health-score', { params: { user_id: userId, period } })
     healthScore.value = res
   } catch {
     // ignore
@@ -447,6 +462,8 @@ const fetchHealthScore = async () => {
     healthLoading.value = false
   }
 }
+
+const switchHealthPeriod = (p) => { fetchHealthScore(p) }
 
 // ===== 类型标签映射 =====
 const getTypeLabel = (type) => {
@@ -592,6 +609,8 @@ const goDetail = (item) => {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.04);
   margin-bottom: 24px;
 }
+.health-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.health-head h3 { margin: 0; font-size: 16px; color: #1a1a2e; }
 .health-loading { display: flex; justify-content: center; padding: 60px; margin-bottom: 24px; background: white; border-radius: 16px; }
 .health-main { display: flex; align-items: center; gap: 40px; margin-bottom: 28px; }
 .health-gauge { flex-shrink: 0; }
@@ -602,11 +621,14 @@ const goDetail = (item) => {
 .health-level { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .level-badge { padding: 6px 20px; border-radius: 20px; color: white; font-size: 16px; font-weight: 700; }
 .level-desc { font-size: 14px; color: #6b7280; }
-.health-trend { font-size: 14px; color: #9ca3af; }
+.health-trend { font-size: 14px; color: #9ca3af; margin-bottom: 8px; }
 .trend-up { color: #16a34a; font-weight: 600; }
 .trend-down { color: #dc2626; font-weight: 600; }
 .trend-flat { color: #9ca3af; }
-.trend-label { margin-left: 4px; }
+.trend-label { margin-left: 4px; font-size: 12px; }
+.mini-sparkline { display: flex; gap: 4px; align-items: flex-end; }
+.spark-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; cursor: pointer; opacity: 0.7; transition: opacity 0.2s; }
+.spark-dot:hover { opacity: 1; transform: scale(1.3); }
 .health-dims { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
 .dim-card {
   padding: 16px; border-radius: 12px; background: #f9fafb;
@@ -616,9 +638,11 @@ const goDetail = (item) => {
 .dim-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .dim-name { font-size: 13px; font-weight: 600; color: #374151; }
 .dim-weight { font-size: 11px; color: #9ca3af; background: #e5e7eb; padding: 1px 8px; border-radius: 8px; }
-.dim-score-row { display: flex; align-items: baseline; gap: 2px; margin-bottom: 8px; }
+.dim-score-row { display: flex; align-items: baseline; gap: 4px; margin-bottom: 8px; }
 .dim-score { font-size: 28px; font-weight: 800; }
 .dim-max { font-size: 13px; color: #9ca3af; }
+.dim-trend { font-size: 13px; font-weight: 600; }
+.dim-trend.green { color: #16a34a; } .dim-trend.red { color: #dc2626; }
 .dim-detail { font-size: 12px; color: #6b7280; margin-top: 6px; }
 
 /* ===== AI 日报 ===== */

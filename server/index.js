@@ -1117,21 +1117,50 @@ app.get('/api/dashboard/health-score', (req, res) => {
     return { level: '警告', color: '#dc2626' }
   }
 
+  // 读取历史对比
+  const period = req.query.period || 'day'
+  const today = new Date().toISOString().slice(0, 10)
+  let prevDate, label
+  if (period === 'week') {
+    prevDate = new Date(); prevDate.setDate(prevDate.getDate() - 7); label = '上周'
+  } else if (period === 'month') {
+    prevDate = new Date(); prevDate.setDate(prevDate.getDate() - 30); label = '上月'
+  } else {
+    prevDate = new Date(); prevDate.setDate(prevDate.getDate() - 1); label = '昨日'
+  }
+  const prevStr = prevDate.toISOString().slice(0, 10)
+
+  const prevSnapshot = db.prepare('SELECT * FROM health_history WHERE user_id = ? AND snapshot_date <= ? ORDER BY snapshot_date DESC LIMIT 1').get(userId, prevStr)
+  let trend = 0, trendLabel = ''
+  if (prevSnapshot) {
+    trend = totalScore - prevSnapshot.total_score
+    trendLabel = `vs ${label} (${prevSnapshot.total_score}分)`
+  }
+
+  // 历史趋势（最近7个快照）
+  const history = db.prepare('SELECT snapshot_date, total_score, level FROM health_history WHERE user_id = ? ORDER BY snapshot_date DESC LIMIT 7').all(userId)
+
   res.json({
-    total_score: totalScore,
+    total_score: totalScore, period,
     ...getLevel(totalScore),
-    trend: 0, // TODO: 后续接入历史对比
+    trend, trend_label: trendLabel,
+    history: history.reverse(),
     dimensions: [
       { key: 'cert', name: '资质合规', score: certScore, max: 100, weight: 25,
-        detail: `有效 ${certValid}/${certTotal}`, route: '/credentials' },
+        detail: `有效 ${certValid}/${certTotal}`, route: '/credentials',
+        trend: prevSnapshot ? certScore - prevSnapshot.cert_score : 0 },
       { key: 'health', name: '人员健康', score: healthScore, max: 100, weight: 20,
-        detail: `有效 ${healthValid}/${healthTotal}`, route: '/personnel/health' },
+        detail: `有效 ${healthValid}/${healthTotal}`, route: '/personnel/health',
+        trend: prevSnapshot ? healthScore - prevSnapshot.health_score : 0 },
       { key: 'material', name: '原料安全', score: materialScore, max: 100, weight: 25,
-        detail: `合格 ${reportQualified}/${reportTotal}`, route: '/raw-material/product-standards' },
+        detail: `合格 ${reportQualified}/${reportTotal}`, route: '/raw-material/product-standards',
+        trend: prevSnapshot ? materialScore - prevSnapshot.material_score : 0 },
       { key: 'pest', name: '虫害控制', score: pestScore, max: 100, weight: 15,
-        detail: pestFindings > 0 ? `近30天 ${pestFindings} 次异常` : '近30天无异常', route: '/third-party/pest' },
+        detail: pestFindings > 0 ? `近30天 ${pestFindings} 次异常` : '近30天无异常', route: '/third-party/pest',
+        trend: prevSnapshot ? pestScore - prevSnapshot.pest_score : 0 },
       { key: 'calib', name: '设备校准', score: calibScore, max: 100, weight: 15,
-        detail: `正常 ${deviceNormal}/${deviceTotal}`, route: '/third-party/calibration' }
+        detail: `正常 ${deviceNormal}/${deviceTotal}`, route: '/third-party/calibration',
+        trend: prevSnapshot ? calibScore - prevSnapshot.calib_score : 0 }
     ]
   })
   } catch (e) {
@@ -4465,6 +4494,58 @@ db.exec(`CREATE TABLE IF NOT EXISTS third_party (
   status TEXT DEFAULT '合作中', remarks TEXT DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME,
   FOREIGN KEY (user_id) REFERENCES users(id))`)
+
+// ---- 健康指数历史 ----
+db.exec(`CREATE TABLE IF NOT EXISTS health_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  snapshot_date TEXT NOT NULL,
+  total_score REAL NOT NULL DEFAULT 0,
+  level TEXT DEFAULT '',
+  cert_score REAL DEFAULT 0, health_score REAL DEFAULT 0,
+  material_score REAL DEFAULT 0, pest_score REAL DEFAULT 0, calib_score REAL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, snapshot_date))`)
+
+// 每天存健康指数快照
+function saveHealthSnapshot() {
+  const today = new Date().toISOString().slice(0, 10)
+  const users = db.prepare('SELECT DISTINCT user_id FROM certificates UNION SELECT DISTINCT user_id FROM health_certs').all()
+  for (const { user_id } of users) {
+    try {
+      const certs = db.prepare('SELECT expiry_date, is_permanent FROM certificates WHERE user_id = ?').all(user_id)
+      const certValid = certs.filter(c => getStatus(c.expiry_date, c.is_permanent) === 'valid').length
+      const certScore = certs.length > 0 ? Math.round((certValid / certs.length) * 100) : 100
+
+      const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ?').all(user_id)
+      const healthValid = healths.filter(h => getStatus(h.expiry_date) === 'valid').length
+      const healthScoreVal = healths.length > 0 ? Math.round((healthValid / healths.length) * 100) : 100
+
+      const reports = db.prepare("SELECT conclusion FROM product_reports WHERE user_id = ?").all(user_id)
+      const reportQualified = reports.filter(r => r.conclusion === '合格').length
+      const materialScore = reports.length > 0 ? Math.round((reportQualified / reports.length) * 100) : 100
+
+      const thirtyAgo = new Date(); thirtyAgo.setDate(thirtyAgo.getDate() - 30)
+      const pestFindings = db.prepare("SELECT COUNT(*) AS cnt FROM pest_inspections WHERE user_id = ? AND inspection_date >= ? AND findings_type != '' AND findings_type IS NOT NULL").get(user_id, thirtyAgo.toISOString().slice(0,10)).cnt
+      const pestScore = Math.max(60, 100 - pestFindings * 5)
+
+      const devices = db.prepare('SELECT calibration_status FROM calibration_devices WHERE user_id = ?').all(user_id)
+      const deviceNormal = devices.filter(d => d.calibration_status === '正常').length
+      const calibScore = devices.length > 0 ? Math.round((deviceNormal / devices.length) * 100) : 100
+
+      const weights = { cert: 25, health: 20, material: 25, pest: 15, calib: 15 }
+      const total = Math.round((certScore * weights.cert + healthScoreVal * weights.health + materialScore * weights.material + pestScore * weights.pest + calibScore * weights.calib) / 100)
+      const level = total >= 90 ? '优秀' : total >= 75 ? '良好' : total >= 60 ? '关注' : '警告'
+
+      db.prepare(`INSERT OR REPLACE INTO health_history (user_id, snapshot_date, total_score, level, cert_score, health_score, material_score, pest_score, calib_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user_id, today, total, level, certScore, healthScoreVal, materialScore, pestScore, calibScore)
+    } catch (e) { console.log('[snapshot] 用户' + user_id + '保存失败:', e.message) }
+  }
+  console.log('[snapshot] ' + today + ' 保存完成, 用户数:', users.length)
+}
+
+// 每天 08:00 自动存快照
+cron.schedule('0 8 * * *', saveHealthSnapshot)
 
 // ---- 搜索缓存 ----
 db.exec(`CREATE TABLE IF NOT EXISTS supplier_search_cache (
