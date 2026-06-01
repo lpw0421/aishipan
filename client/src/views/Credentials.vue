@@ -137,6 +137,11 @@
 
     <!-- ===== 添加/编辑证照弹窗 ===== -->
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'add' ? '添加证照' : '编辑证照'" width="560px">
+      <!-- AI 智能填写 -->
+      <div v-if="dialogMode === 'add'" class="ai-fill-bar">
+        <el-input v-model="aiText" type="textarea" :rows="2" placeholder='🤖 粘贴证照描述，AI自动填写。如："供应商XX食品有限公司，营业执照，有效期2026-12-31"' size="small" />
+        <el-button type="success" size="small" @click="aiFill" :loading="aiLoading" style="margin-top:6px">AI 智能填写</el-button>
+      </div>
       <el-form :model="form" label-width="90px">
         <el-form-item label="资质分类">
           <el-radio-group v-model="form.category">
@@ -348,6 +353,30 @@ const handleBatchDelete = async () => {
 // ===== 添加/编辑证照 =====
 const dialogVisible = ref(false)
 const dialogMode = ref('add')
+const aiText = ref('')
+const aiLoading = ref(false)
+
+const aiFill = async () => {
+  if (!aiText.value.trim()) return ElMessage.warning('请粘贴证照描述文本')
+  aiLoading.value = true
+  try {
+    const res = await axios.post('/api/ai/extract-cert', { text: aiText.value })
+    if (res.data.method === 'ai') {
+      if (res.data.category) form.category = res.data.category
+      if (res.data.company_name) form.company_name = res.data.company_name
+      if (res.data.product_name) form.product_name = res.data.product_name
+      if (res.data.name) form.name = res.data.name
+      if (res.data.expiry_date) form.expiry_date = res.data.expiry_date
+      if (res.data.is_permanent !== undefined) form.is_permanent = res.data.is_permanent
+      ElMessage.success('AI已自动填写，请核对后保存')
+      aiText.value = ''
+    } else {
+      ElMessage.warning(res.data.message || 'AI提取失败')
+    }
+  } catch (e) {
+    ElMessage.error('AI服务异常')
+  } finally { aiLoading.value = false }
+}
 const editingId = ref(null)
 const uploadRef = ref(null)
 const selectedFiles = ref([])
@@ -497,6 +526,10 @@ const downloadFile = (filePath) => {
 </script>
 
 <style scoped>
+/* AI填写 */
+.ai-fill-bar { margin-bottom: 12px; padding: 10px; background: #f0fdf4; border-radius: 8px; border: 1px solid #bbf7d0; }
+.ai-fill-bar :deep(.el-textarea__inner) { font-size: 13px; }
+.ai-fill-bar .el-button { width: 100%; }
 .stats-row {
   margin-bottom: 16px;
 }

@@ -74,6 +74,10 @@
     </el-card>
 
     <el-dialog :title="editingId ? '编辑人员' : '新增人员'" v-model="showForm" width="550px" @close="resetForm">
+      <div v-if="!editingId" class="ai-fill-bar">
+        <el-input v-model="aiText" type="textarea" :rows="2" placeholder='🤖 粘贴描述，AI自动填写。如："张三，品控部质检员，健康证2026-12-31到期"' size="small" />
+        <el-button type="success" size="small" @click="aiFill" :loading="aiLoading" style="margin-top:6px">AI 智能填写</el-button>
+      </div>
       <el-form :model="form" label-width="100px">
         <el-form-item label="姓名"><el-input v-model="form.name" /></el-form-item>
         <el-row :gutter="12">
@@ -111,6 +115,27 @@ const filterDepartment = ref('')
 const filterStatus = ref('')
 const showForm = ref(false)
 const editingId = ref(null)
+const aiText = ref('')
+const aiLoading = ref(false)
+
+const aiFill = async () => {
+  if (!aiText.value.trim()) return
+  aiLoading.value = true
+  try {
+    const res = await axios.post('/api/ai/extract-person', { text: aiText.value })
+    if (res.data.method === 'ai') {
+      if (res.data.name) form.name = res.data.name
+      if (res.data.department) form.department = res.data.department
+      if (res.data.position) form.position = res.data.position
+      if (res.data.phone) form.phone = res.data.phone
+      if (res.data.health_cert_expiry) form.health_cert_expiry = res.data.health_cert_expiry
+      if (res.data.entry_date) form.entry_date = res.data.entry_date
+      ElMessage.success('AI已填写，请核对')
+      aiText.value = ''
+    }
+  } catch { ElMessage.error('AI异常') }
+  finally { aiLoading.value = false }
+}
 
 const form = reactive({
   name: '', department: '', position: '', phone: '', entry_date: '',
@@ -190,6 +215,9 @@ onMounted(() => { fetchList(); fetchStats() })
 <style scoped>
 .page-container{padding:0}
 .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.ai-fill-bar{margin-bottom:12px;padding:10px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0}
+.ai-fill-bar :deep(.el-textarea__inner){font-size:13px}
+.ai-fill-bar .el-button{width:100%}
 .toolbar h2{margin:0;color:#303133}
 .stat-row{margin-bottom:16px}
 .stat-card{text-align:center;cursor:pointer}

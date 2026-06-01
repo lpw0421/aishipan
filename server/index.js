@@ -3573,6 +3573,50 @@ app.delete('/api/calibration/exceptions/:id', (req, res) => {
 
 // ---- 原料库 ----
 
+// ---- AI 智能提取证照信息 ----
+app.post('/api/ai/extract-cert', async (req, res) => {
+  const { text } = req.body
+  if (!text || !text.trim()) return res.status(400).json({ message: '请输入证照描述文本' })
+  const aiKey = process.env.AI_API_KEY
+  if (!aiKey) return res.json({ method: 'fallback', message: 'AI未配置' })
+  try {
+    const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat', messages: [
+          { role: 'system', content: '从文本提取证照信息。返回JSON: {"category":"own或supplier","company_name":"企业","product_name":"产品(无则空)","name":"证照名称","expiry_date":"YYYY-MM-DD","is_permanent":true/false}' },
+          { role: 'user', content: text.substring(0, 500) }
+        ], max_tokens: 300, temperature: 0.1, response_format: { type: 'json_object' }
+      })
+    })
+    const data = await aiRes.json()
+    const result = JSON.parse(data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```/g, ''))
+    res.json({ method: 'ai', ...result })
+  } catch (e) { res.json({ method: 'error', message: 'AI提取失败: ' + e.message }) }
+})
+
+// ---- AI 智能提取人员信息 ----
+app.post('/api/ai/extract-person', async (req, res) => {
+  const { text } = req.body
+  if (!text || !text.trim()) return res.status(400).json({ message: '请输入人员描述' })
+  const aiKey = process.env.AI_API_KEY
+  if (!aiKey) return res.json({ method: 'fallback', message: 'AI未配置' })
+  try {
+    const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat', messages: [
+          { role: 'system', content: '从文本提取人员信息。返回JSON: {"name":"姓名","department":"部门","position":"职位","phone":"电话","health_cert_expiry":"健康证到期YYYY-MM-DD","entry_date":"入职日期YYYY-MM-DD"}' },
+          { role: 'user', content: text.substring(0, 300) }
+        ], max_tokens: 300, temperature: 0.1, response_format: { type: 'json_object' }
+      })
+    })
+    const data = await aiRes.json()
+    const result = JSON.parse(data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```/g, ''))
+    res.json({ method: 'ai', ...result })
+  } catch (e) { res.json({ method: 'error', message: 'AI提取失败: ' + e.message }) }
+})
+
 app.get('/api/raw-materials', (req, res) => {
   const { user_id, keyword, category, risk_level, status } = req.query
   let sql = `SELECT rm.*, CASE WHEN rms.id IS NOT NULL THEN 1 ELSE 0 END AS hasStandard
