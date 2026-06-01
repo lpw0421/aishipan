@@ -90,14 +90,7 @@ async function handleAdminCommand(msgId, senderOpenId, text) {
 }
 
 // ===== 数据录入命令 =====
-const Database = require('better-sqlite3')
-const path = require('path')
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'aishipan.db')
-const getDb = () => {
-  const db = new Database(DB_PATH)
-  db.pragma('journal_mode=WAL')
-  return db
-}
+const mainDb = require('./db')  // 复用主数据库连接
 
 // 从文本提取+保存证照
 async function saveCertFromText(senderOpenId, text) {
@@ -118,11 +111,9 @@ async function saveCertFromText(senderOpenId, text) {
 
     if (!info.company_name || !info.name) return '未能识别企业名称和证照名称，请重新描述。例如：\n/录入证照 上海汉康食品，营业执照，2026-12-31到期'
 
-    const db = getDb()
-    // 查找用户（优先open_id匹配 → 回退到管理员）
+    const db = mainDb
     let userId = 1
-    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
-    if (user) userId = user.id
+    try { const u = db.prepare('SELECT id FROM users LIMIT 1').get(); if (u) userId = u.id } catch {}
 
     db.prepare(`INSERT INTO certificates (user_id, name, expiry_date, is_permanent, category, company_name, product_name, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'valid')`)
@@ -151,10 +142,9 @@ async function savePersonFromText(senderOpenId, text) {
 
     if (!info.name) return '未能识别姓名，请重新描述。例如：\n/录入人员 张三，品控部质检员，健康证2026-08-31到期'
 
-    const db = getDb()
+    const db = mainDb
     let userId = 1
-    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
-    if (user) userId = user.id
+    try { const u = db.prepare('SELECT id FROM users LIMIT 1').get(); if (u) userId = u.id } catch {}
 
     db.prepare(`INSERT INTO personnel (user_id, name, department, position, phone, health_cert_expiry, entry_date, employee_number, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '在职')`)
@@ -164,7 +154,7 @@ async function savePersonFromText(senderOpenId, text) {
     // 同步加健康证记录
     if (info.health_cert_expiry) {
       db.prepare('INSERT INTO health_certs (user_id, employee_name, expiry_date) VALUES (?, ?, ?)')
-        .run(user.id, info.name, info.health_cert_expiry)
+        .run(userId, info.name, info.health_cert_expiry)
     }
 
     return `✅ 人员已录入: ${info.name}` + (info.department ? ` ${info.department}` : '') + (info.health_cert_expiry ? ` 健康证${info.health_cert_expiry}到期` : '')
@@ -174,10 +164,9 @@ async function savePersonFromText(senderOpenId, text) {
 // 快捷查询
 async function quickQuery(senderOpenId, query) {
   try {
-    const db = getDb()
+    const db = mainDb
     let userId = 1
-    const user = db.prepare('SELECT id FROM users WHERE open_id = ?').get(senderOpenId)
-    if (user) userId = user.id
+    try { const u = db.prepare('SELECT id FROM users LIMIT 1').get(); if (u) userId = u.id } catch {}
 
     if (query.includes('到期') || query.includes('临期')) {
       const warnings = db.prepare("SELECT name, company_name, expiry_date FROM certificates WHERE user_id = ? AND expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') ORDER BY expiry_date LIMIT 5").all(userId)
