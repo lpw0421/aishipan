@@ -28,6 +28,9 @@ try { db.exec('ALTER TABLE users ADD COLUMN name TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "user"') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN team_id INTEGER DEFAULT 0') } catch {}
+// 现有用户归入默认团队
+db.prepare("UPDATE users SET team_id = 1 WHERE team_id = 0 OR team_id IS NULL").run()
 
 // 短信验证码表
 db.exec(`CREATE TABLE IF NOT EXISTS sms_codes (

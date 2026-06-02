@@ -82,6 +82,24 @@ const strictLimiter = rateLimit({
   message: { message: '操作过于频繁，请1分钟后再试' }
 })
 
+// 团队数据共享中间件：同一团队的用户共享数据
+app.use('/api', (req, res, next) => {
+  const userId = req.query.user_id || req.body.user_id
+  if (userId && userId != 1) {
+    const user = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(userId)
+    if (user && user.team_id && user.role !== 'admin') {
+      // 找到团队管理员
+      const admin = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'admin' LIMIT 1").get(user.team_id)
+      if (admin && admin.id != userId) {
+        // 替换为管理员ID，让团队成员共享数据
+        if (req.query.user_id) req.query.user_id = String(admin.id)
+        if (req.body.user_id) req.body.user_id = String(admin.id)
+      }
+    }
+  }
+  next()
+})
+
 app.use('/api', generalLimiter)
 
 // 托管 uploads 文件夹，使前端可通过 /uploads/xxx.jpg 访问上传的图片
@@ -411,7 +429,7 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     let user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     if (!user) {
       const username = 'fs_' + openId.substring(0, 12)
-      db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role) VALUES (?, '', ?, ?, ?, ?)").run(username, openId, name, avatar, isAdmin ? 'admin' : 'user')
+      db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role, team_id) VALUES (?, '', ?, ?, ?, ?, 1)").run(username, openId, name, avatar, isAdmin ? 'admin' : 'user')
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     } else {
       db.prepare('UPDATE users SET name = ?, avatar = ?, role = ? WHERE open_id = ?').run(name, avatar, isAdmin ? 'admin' : 'user', openId)
@@ -431,9 +449,44 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
   }
 })
 
+// ===== 阿里云短信 =====
+let smsClient = null
+try {
+  const Core = require('@alicloud/pop-core')
+  if (process.env.ALIBABA_ACCESS_KEY_ID && process.env.ALIBABA_ACCESS_KEY_SECRET) {
+    smsClient = new Core({
+      accessKeyId: process.env.ALIBABA_ACCESS_KEY_ID,
+      accessKeySecret: process.env.ALIBABA_ACCESS_KEY_SECRET,
+      endpoint: 'https://dysmsapi.aliyuncs.com',
+      apiVersion: '2017-05-25'
+    })
+    console.log('📱 阿里云短信已就绪')
+  }
+} catch (e) { console.log('📱 短信SDK未配置') }
+
+async function sendSms(phone, code) {
+  if (!smsClient || !process.env.SMS_SIGN_NAME || !process.env.SMS_TEMPLATE_CODE) {
+    console.log(`[短信] ${phone} 验证码: ${code}`)
+    return { sent: false, message: '短信服务未配置，验证码已打印到控制台' }
+  }
+  try {
+    const result = await smsClient.request('SendSms', {
+      PhoneNumbers: phone,
+      SignName: process.env.SMS_SIGN_NAME,
+      TemplateCode: process.env.SMS_TEMPLATE_CODE,
+      TemplateParam: JSON.stringify({ code })
+    }, { method: 'POST' })
+    return { sent: result.Code === 'OK', message: result.Code === 'OK' ? '验证码已发送' : result.Message }
+  } catch (e) {
+    console.log(`[短信] 发送失败:`, e.message)
+    console.log(`[短信] ${phone} 验证码: ${code}`)
+    return { sent: false, message: '短信发送失败，验证码: ' + code }
+  }
+}
+
 // ===== 短信验证码 =====
 // 发送验证码
-app.post('/api/auth/send-code', strictLimiter, (req, res) => {
+app.post('/api/auth/send-code', strictLimiter, async (req, res) => {
   const { phone } = req.body
   if (!phone || !/^1[3-9]\d{9}$/.test(phone)) return res.status(400).json({ message: '请输入正确的手机号' })
 
@@ -444,10 +497,8 @@ app.post('/api/auth/send-code', strictLimiter, (req, res) => {
   const code = String(Math.floor(100000 + Math.random() * 900000))
   db.prepare("INSERT INTO sms_codes (phone, code, expires_at) VALUES (?, ?, datetime('now', '+5 minutes'))").run(phone, code)
 
-  // TODO: 接入阿里云短信服务
-  console.log(`[短信] ${phone} 验证码: ${code}`)
-
-  res.json({ message: '验证码已发送', debug_code: code }) // debug_code 上线后删除
+  const result = await sendSms(phone, code)
+  res.json({ message: result.message })
 })
 
 // 验证码登录
@@ -464,7 +515,7 @@ app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
   let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
   if (!user) {
     const username = 'u' + phone.substring(7)
-    db.prepare("INSERT INTO users (username, password, phone, role) VALUES (?, '', ?, 'user')").run(username, phone)
+    db.prepare("INSERT INTO users (username, password, phone, role, team_id) VALUES (?, '', ?, 'user', 1)").run(username, phone)
     user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
   }
 
