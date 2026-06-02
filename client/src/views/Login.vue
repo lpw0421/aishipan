@@ -13,14 +13,8 @@
           <p class="login-subtitle">智慧食品安全管理平台</p>
         </div>
 
-        <!-- Login Tabs -->
-        <div class="login-tabs">
-          <span :class="{ active: loginMode === 'password' }" @click="loginMode = 'password'">密码登录</span>
-          <span :class="{ active: loginMode === 'sms' }" @click="loginMode = 'sms'">验证码登录</span>
-        </div>
-
-        <!-- Password Login -->
-        <form v-if="loginMode === 'password'" @submit.prevent="handleLogin">
+        <!-- Login Form -->
+        <form @submit.prevent="handleLogin">
           <div class="form-group">
             <label class="form-label">用户名</label>
             <div class="input-wrapper">
@@ -94,49 +88,6 @@
             <span class="spinner"></span>
           </button>
         </form>
-
-        <!-- SMS Login -->
-        <form v-if="loginMode === 'sms'" @submit.prevent="handleSmsLogin">
-          <div class="form-group">
-            <label class="form-label">手机号</label>
-            <div class="input-wrapper">
-              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-              <input type="tel" class="form-input" placeholder="请输入手机号" v-model="smsForm.phone" @input="clearError" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">邀请码 <span style="font-weight:normal;color:#9ca3af;font-size:11px">(加入已有团队需填写)</span></label>
-            <div class="input-wrapper">
-              <input type="text" class="form-input" placeholder="AI开头的邀请码（选填）" v-model="smsForm.invite_code" @input="clearError" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">验证码</label>
-            <div class="input-row">
-              <input type="text" class="form-input code-input" placeholder="6位验证码" v-model="smsForm.code" @input="clearError" maxlength="6" />
-              <button type="button" class="send-code-btn" @click="sendCode" :disabled="codeCountdown > 0">
-                {{ codeCountdown > 0 ? codeCountdown + 's' : '获取验证码' }}
-              </button>
-            </div>
-          </div>
-          <div class="error-msg" v-if="errorMsg">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-            {{ errorMsg }}
-          </div>
-          <button type="submit" class="login-btn" :class="{ loading: loading }" :disabled="loading">
-            <span class="btn-text">登 录</span>
-            <span class="spinner"></span>
-          </button>
-        </form>
-
-        <!-- 飞书登录 -->
-        <div class="feishu-login">
-          <div class="divider"><span>或</span></div>
-          <button type="button" class="feishu-btn" @click="feishuLogin">
-            <svg viewBox="0 0 24 24" width="20" height="20"><rect x="2" y="2" width="20" height="20" rx="4" fill="#3370ff"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="11" font-weight="bold">飞</text></svg>
-            飞书登录
-          </button>
-        </div>
 
         <!-- 底部注册 -->
         <div class="login-footer">
