@@ -90,6 +90,15 @@
           </button>
         </form>
 
+        <!-- 飞书登录 -->
+        <div class="feishu-login">
+          <div class="divider"><span>或</span></div>
+          <button type="button" class="feishu-btn" @click="feishuLogin">
+            <svg viewBox="0 0 24 24" width="20" height="20"><rect x="2" y="2" width="20" height="20" rx="4" fill="#3370ff"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="11" font-weight="bold">飞</text></svg>
+            飞书登录
+          </button>
+        </div>
+
         <!-- 底部注册 -->
         <div class="login-footer">
           <span class="register-link">
@@ -166,9 +175,30 @@ const handleLogin = async () => {
   }
 }
 
+const feishuLogin = () => {
+  window.location.href = '/api/auth/feishu/login'
+}
+
 const goRegister = () => {
   router.push('/register')
 }
+
+// 处理飞书登录回调
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('feishu_login') === '1') {
+    const token = params.get('token')
+    const userStr = params.get('user')
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(decodeURIComponent(userStr))
+        localStorage.setItem('user', JSON.stringify(user))
+        localStorage.setItem('token', token)
+        router.push('/dashboard')
+      } catch {}
+    }
+  }
+})
 </script>
 
 <style scoped>
@@ -502,6 +532,19 @@ const goRegister = () => {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ===== 飞书登录 ===== */
+.feishu-login { margin-bottom: 12px; }
+.divider { display: flex; align-items: center; margin: 20px 0; color: #c0c0cc; font-size: 12px; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e8e8f0; }
+.divider span { padding: 0 12px; }
+.feishu-btn {
+  width: 100%; height: 44px; border: 1.5px solid #3370ff; border-radius: 12px;
+  background: white; color: #3370ff; font-size: 15px; font-weight: 500;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: all 0.2s;
+}
+.feishu-btn:hover { background: #f0f5ff; }
 
 /* ===== 底部 ===== */
 .login-footer {

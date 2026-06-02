@@ -342,9 +342,11 @@ module.exports = async function feishuWebhook(req, res) {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form
               })
               let fileId = ''
-              if (uploadRes.ok) {
-                const upData = await uploadRes.json()
-                fileId = upData.data?.file_key || ''
+              const upData = await uploadRes.json().catch(() => ({}))
+              if (uploadRes.ok && upData.data?.file_key) {
+                fileId = upData.data.file_key
+              } else {
+                console.log('[语音] 上传失败:', uploadRes.status, JSON.stringify(upData).substring(0,200))
               }
               fs.unlinkSync(tmpIn); fs.unlinkSync(tmpWav)
               console.log('[语音] 上传file_id:', fileId || '失败')

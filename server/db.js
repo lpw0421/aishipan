@@ -20,6 +20,13 @@ db.exec(`
   )
 `)
 
+// 迁移：补充 users 新列
+try { db.exec('ALTER TABLE users ADD COLUMN open_id TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN token TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN token_expire TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN name TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ""') } catch {}
+
 // 创建 certificates 表：存储证照信息
 db.exec(`
   CREATE TABLE IF NOT EXISTS certificates (

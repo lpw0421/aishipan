@@ -361,6 +361,72 @@ app.post('/api/auth/register', strictLimiter, (req, res) => {
   res.json({ message: '注册成功', userId: result.lastInsertRowid })
 })
 
+// ===== 飞书 OAuth 登录 =====
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID
+const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET
+const BASE_URL = process.env.BASE_URL || 'http://39.107.109.188'
+
+// 1) 跳转飞书授权页
+app.get('/api/auth/feishu/login', (req, res) => {
+  if (!FEISHU_APP_ID) return res.redirect('/login?error=飞书登录未配置')
+  const redirectUri = BASE_URL + '/api/auth/feishu/callback'
+  const state = Math.random().toString(36).substring(2)
+  const url = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`
+  res.redirect(url)
+})
+
+// 2) 飞书回调 — 获取用户信息 → 自动注册/登录
+app.get('/api/auth/feishu/callback', async (req, res) => {
+  const { code } = req.query
+  if (!code) return res.redirect('/login?error=授权失败')
+
+  try {
+    // 用 code 换 access_token
+    const tokenRes = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'authorization_code', code })
+    })
+    const tokenData = await tokenRes.json()
+    if (!tokenData.data) return res.redirect('/login?error=令牌获取失败')
+
+    // 获取用户信息
+    const userRes = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
+      headers: { 'Authorization': `Bearer ${tokenData.data.access_token}` }
+    })
+    const userData = await userRes.json()
+    if (!userData.data) return res.redirect('/login?error=用户信息获取失败')
+
+    const feishuUser = userData.data
+    const openId = feishuUser.open_id || ''
+    const name = feishuUser.name || '飞书用户'
+    const avatar = feishuUser.avatar_url || ''
+
+    // 查找或创建用户
+    let user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
+    if (!user) {
+      const username = 'fs_' + openId.substring(0, 12)
+      db.prepare("INSERT INTO users (username, password, open_id, name, avatar) VALUES (?, '', ?, ?, ?)").run(username, openId, name, avatar)
+      user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
+    } else {
+      // 更新用户名和头像
+      db.prepare('UPDATE users SET name = ?, avatar = ? WHERE open_id = ?').run(name, avatar, openId)
+      user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
+    }
+
+    // 生成简单 token，写入 cookie 和返回前端
+    const token = crypto.randomBytes(32).toString('hex')
+    db.prepare('UPDATE users SET token = ?, token_expire = datetime("now", "+7 days") WHERE id = ?').run(token, user.id)
+
+    // 重定向到前端，带上 token 和用户信息
+    const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar }))
+    res.redirect(`/?feishu_login=1&token=${token}&user=${userInfo}`)
+  } catch (e) {
+    console.error('[飞书登录]', e.message)
+    res.redirect('/login?error=登录异常')
+  }
+})
+
 // ===== 登录接口 =====
 app.post('/api/auth/login', strictLimiter, (req, res) => {
   const { username, password } = req.body

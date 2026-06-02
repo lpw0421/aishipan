@@ -8,7 +8,29 @@
 </template>
 
 <script setup>
-// App 根组件：只负责渲染路由匹配的页面
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+// 飞书 OAuth 回调处理
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('feishu_login') === '1') {
+    const token = params.get('token')
+    const userStr = params.get('user')
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(decodeURIComponent(userStr))
+        localStorage.setItem('user', JSON.stringify(user))
+        localStorage.setItem('token', token)
+        // 清除 URL 参数
+        window.history.replaceState({}, '', '/dashboard')
+        router.push('/dashboard')
+      } catch {}
+    }
+  }
+})
 </script>
 
 <style>
