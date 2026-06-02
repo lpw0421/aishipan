@@ -382,13 +382,17 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
 
   try {
     // 用 code 换 access_token
+    console.log('[飞书登录] code:', code.substring(0,10) + '...')
     const tokenRes = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'authorization_code', code })
+      body: JSON.stringify({ grant_type: 'authorization_code', code, app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET })
     })
     const tokenData = await tokenRes.json()
-    if (!tokenData.data) return res.redirect('/login?error=令牌获取失败')
+    console.log('[飞书登录] token响应:', JSON.stringify(tokenData).substring(0, 200))
+    if (!tokenData.data || !tokenData.data.access_token) {
+      return res.redirect('/login?error=令牌获取失败: ' + (tokenData.msg || tokenData.error || 'unknown'))
+    }
 
     // 获取用户信息
     const userRes = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
@@ -416,11 +420,11 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
 
     // 生成简单 token，写入 cookie 和返回前端
     const token = crypto.randomBytes(32).toString('hex')
-    db.prepare('UPDATE users SET token = ?, token_expire = datetime("now", "+7 days") WHERE id = ?').run(token, user.id)
+    db.prepare("UPDATE users SET token = ?, token_expire = datetime('now', '+7 days') WHERE id = ?").run(token, user.id)
 
     // 重定向到前端，带上 token 和用户信息
     const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar, role: user.role }))
-    res.redirect(`/?feishu_login=1&token=${token}&user=${userInfo}`)
+    res.redirect(`/login?feishu_login=1&token=${token}&user=${userInfo}`)
   } catch (e) {
     console.error('[飞书登录]', e.message)
     res.redirect('/login?error=登录异常')
