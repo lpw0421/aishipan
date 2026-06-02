@@ -376,7 +376,16 @@ const standardConfig = reactive({
   judge_rules: { pass: '', concession: '', reject: '' }
 })
 
-const categories = ['原料肉', '香辛料', '基础调味料', '复合调味料', '食品添加剂', '油脂类', '辅料', '蔬菜类', '肠衣', '包装材料', '其他']
+const categories = [
+  '畜禽肉类', '水产类', '蛋类', '乳制品', '粮油类', '豆制品',
+  '蔬菜类', '水果类', '食用菌', '坚果籽类',
+  '香辛料', '基础调味料', '复合调味料', '酱腌菜',
+  '食品添加剂', '复配添加剂', '加工助剂',
+  '淀粉及制品', '糖类', '油脂类', '食盐',
+  '面粉谷物', '速冻原料', '干货类',
+  '包装材料', '消毒剂清洗剂', '食品接触材料',
+  '其他'
+]
 
 const form = reactive({
   material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
