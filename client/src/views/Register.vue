@@ -12,6 +12,10 @@
         <el-form-item label="确认密码">
           <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" />
         </el-form-item>
+        <el-form-item label="邀请码">
+          <el-input v-model="form.invite_code" placeholder="AI开头的团队邀请码（选填）" />
+          <div style="color:#909399;font-size:12px;margin-top:4px">填入邀请码可加入已有团队，不填则创建新团队</div>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleRegister" :loading="loading">注册</el-button>
           <el-button type="text" @click="goLogin">返回登录</el-button>
@@ -34,7 +38,8 @@ const loading = ref(false)
 const form = reactive({
   username: '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
+  invite_code: ''
 })
 
 // 注册处理
@@ -58,10 +63,12 @@ const handleRegister = async () => {
     // 调用后端注册接口
     const res = await request.post('/auth/register', {
       username: form.username,
-      password: form.password
+      password: form.password,
+      invite_code: form.invite_code
     })
 
-    ElMessage.success(res.message)
+    const msg = res.message + (res.invite_code ? '，你的团队邀请码: ' + res.invite_code : '')
+    ElMessage.success(msg)
     // 注册成功，跳回登录页
     router.push('/login')
   } catch {

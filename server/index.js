@@ -374,9 +374,27 @@ app.post('/api/auth/register', strictLimiter, (req, res) => {
   }
 
   const hashed = hashPassword(password)
-  const result = db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hashed)
+  const inviteCode = req.body.invite_code || ''
 
-  res.json({ message: '注册成功', userId: result.lastInsertRowid })
+  // 创建或加入团队
+  let teamId = 0, role = 'admin'
+  if (inviteCode) {
+    const team = db.prepare('SELECT id FROM teams WHERE invite_code = ?').get(inviteCode.toUpperCase())
+    if (team) { teamId = team.id; role = 'user' }
+  }
+  if (!teamId) {
+    const code = 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase()
+    const teamResult = db.prepare('INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, 0)').run(username + '的团队', code)
+    teamId = teamResult.lastInsertRowid
+  }
+
+  const result = db.prepare('INSERT INTO users (username, password, role, team_id) VALUES (?, ?, ?, ?)').run(username, hashed, role, teamId)
+  if (!inviteCode) {
+    db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(result.lastInsertRowid, teamId)
+  }
+
+  const team = db.prepare('SELECT invite_code FROM teams WHERE id = ?').get(teamId)
+  res.json({ message: '注册成功', userId: result.lastInsertRowid, invite_code: team.invite_code, is_admin: role === 'admin' })
 })
 
 // ===== 团队管理 =====
