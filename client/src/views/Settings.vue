@@ -55,8 +55,22 @@
     <el-card class="section-card">
       <template #header><span class="card-title">🏢 团队信息</span></template>
       <div v-if="teamInfo" class="team-info">
-        <div class="team-row"><span>团队名称</span><strong>{{ teamInfo.name }}</strong></div>
-        <div class="team-row"><span>邀请码</span><code class="invite-code">{{ teamInfo.invite_code }}</code></div>
+        <div class="team-row">
+          <span>团队名称</span>
+          <div v-if="editingTeam" style="display:flex;gap:6px">
+            <el-input v-model="teamName" size="small" style="width:180px" />
+            <el-button size="small" type="primary" @click="saveTeamName" :loading="teamSaving">保存</el-button>
+            <el-button size="small" @click="editingTeam = false">取消</el-button>
+          </div>
+          <div v-else>
+            <strong>{{ teamInfo.name }}</strong>
+            <el-button v-if="profile.role === 'admin'" link size="small" @click="editingTeam = true; teamName = teamInfo.name">✏️</el-button>
+          </div>
+        </div>
+        <div class="team-row"><span>邀请码</span>
+          <code class="invite-code">{{ teamInfo.invite_code }}</code>
+          <el-button v-if="profile.role === 'admin'" link size="small" @click="regenerateCode" :loading="codeRegenerating">🔄 重置</el-button>
+        </div>
         <div class="team-row"><span>成员数</span><strong>{{ teamMembers.length }} 人</strong></div>
         <div class="member-list" v-if="teamMembers.length">
           <div class="member-item" v-for="m in teamMembers" :key="m.id">
@@ -80,6 +94,10 @@ const saving = ref(false)
 const changing = ref(false)
 const teamInfo = ref(null)
 const teamMembers = ref([])
+const editingTeam = ref(false)
+const teamName = ref('')
+const teamSaving = ref(false)
+const codeRegenerating = ref(false)
 
 const profile = reactive({
   username: user.username || '',
@@ -126,6 +144,30 @@ const changePassword = async () => {
   } catch (e) {
     ElMessage.error(e.response?.data?.message || '修改失败')
   } finally { changing.value = false }
+}
+
+const saveTeamName = async () => {
+  if (!teamName.value) return
+  teamSaving.value = true
+  try {
+    await axios.put('/api/team/' + teamInfo.value.id, { user_id: user.id, name: teamName.value })
+    teamInfo.value.name = teamName.value
+    editingTeam.value = false
+    ElMessage.success('团队名称已更新')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '修改失败')
+  } finally { teamSaving.value = false }
+}
+
+const regenerateCode = async () => {
+  codeRegenerating.value = true
+  try {
+    const res = await axios.post('/api/team/' + teamInfo.value.id + '/reset-code', { user_id: user.id })
+    teamInfo.value.invite_code = res.invite_code
+    ElMessage.success('新邀请码: ' + res.invite_code)
+  } catch (e) {
+    ElMessage.error('重置失败')
+  } finally { codeRegenerating.value = false }
 }
 </script>
 

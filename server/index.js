@@ -450,6 +450,26 @@ app.post('/api/team/join', (req, res) => {
   res.json({ team_id: team.id, team_name: team.name, message: '已加入 ' + team.name })
 })
 
+// 修改团队名称
+app.put('/api/team/:id', (req, res) => {
+  const { user_id, name } = req.body
+  if (!name) return res.status(400).json({ message: '名称不能为空' })
+  const user = db.prepare('SELECT role, team_id FROM users WHERE id = ?').get(user_id)
+  if (!user || user.role !== 'admin') return res.status(403).json({ message: '仅管理员可修改' })
+  db.prepare('UPDATE teams SET name = ? WHERE id = ? AND owner_id = ?').run(name, req.params.id, user_id)
+  res.json({ message: '团队名称已更新' })
+})
+
+// 重置邀请码
+app.post('/api/team/:id/reset-code', (req, res) => {
+  const { user_id } = req.body
+  const user = db.prepare('SELECT role, team_id FROM users WHERE id = ?').get(user_id)
+  if (!user || user.role !== 'admin') return res.status(403).json({ message: '仅管理员可操作' })
+  const newCode = 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase()
+  db.prepare('UPDATE teams SET invite_code = ? WHERE id = ?').run(newCode, req.params.id)
+  res.json({ invite_code: newCode, message: '邀请码已重置' })
+})
+
 // ===== 飞书 OAuth 登录 =====
 const FEISHU_APP_ID = process.env.FEISHU_APP_ID
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET
