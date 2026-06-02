@@ -403,14 +403,14 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     const avatar = feishuUser.avatar_url || ''
 
     // 查找或创建用户
+    const isAdmin = (openId === process.env.FEISHU_ALERT_OPEN_ID)
     let user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     if (!user) {
       const username = 'fs_' + openId.substring(0, 12)
-      db.prepare("INSERT INTO users (username, password, open_id, name, avatar) VALUES (?, '', ?, ?, ?)").run(username, openId, name, avatar)
+      db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role) VALUES (?, '', ?, ?, ?, ?)").run(username, openId, name, avatar, isAdmin ? 'admin' : 'user')
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     } else {
-      // 更新用户名和头像
-      db.prepare('UPDATE users SET name = ?, avatar = ? WHERE open_id = ?').run(name, avatar, openId)
+      db.prepare('UPDATE users SET name = ?, avatar = ?, role = ? WHERE open_id = ?').run(name, avatar, isAdmin ? 'admin' : 'user', openId)
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     }
 
@@ -419,7 +419,7 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     db.prepare('UPDATE users SET token = ?, token_expire = datetime("now", "+7 days") WHERE id = ?').run(token, user.id)
 
     // 重定向到前端，带上 token 和用户信息
-    const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar }))
+    const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar, role: user.role }))
     res.redirect(`/?feishu_login=1&token=${token}&user=${userInfo}`)
   } catch (e) {
     console.error('[飞书登录]', e.message)

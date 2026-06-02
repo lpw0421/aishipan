@@ -26,6 +26,12 @@ try { db.exec('ALTER TABLE users ADD COLUMN token TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN token_expire TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN name TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "user"') } catch {}
+// 第一个用户自动设为 admin
+const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users').get().cnt
+if (userCount === 0) {
+  db.prepare("INSERT INTO users (username, password, role) VALUES ('admin', ?, 'admin')").run(require('crypto').createHash('sha256').update('admin123').digest('hex'))
+}
 
 // 创建 certificates 表：存储证照信息
 db.exec(`

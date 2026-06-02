@@ -146,6 +146,7 @@
             <span class="user-info">
               <el-icon><UserFilled /></el-icon>
               {{ username }}
+              <span v-if="userRole === 'admin'" class="admin-tag">管理员</span>
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -224,7 +225,8 @@ const updateTime = () => {
 // 从 localStorage 获取当前登录用户名
 const userStr = localStorage.getItem('user')
 const user = userStr ? JSON.parse(userStr) : {}
-const username = user.username || '未知用户'
+const username = user.username || user.name || '未知用户'
+const userRole = user.role || 'user'
 const userId = user.id
 
 // 下拉菜单命令处理
