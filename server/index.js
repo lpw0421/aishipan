@@ -3929,6 +3929,20 @@ app.post('/api/ai/extract-person', async (req, res) => {
   } catch (e) { res.json({ method: 'error', message: 'AI提取失败: ' + e.message }) }
 })
 
+// 批量导入原料
+app.post('/api/raw-materials/batch', (req, res) => {
+  const { items, user_id } = req.body
+  if (!items || !items.length) return res.status(400).json({ message: '无数据' })
+  let count = 0
+  const insert = db.prepare('INSERT INTO raw_materials (user_id, material_name, category, specification, shelf_life, storage_condition) VALUES (?,?,?,?,?,?)')
+  for (const item of items) {
+    if (!item.material_name) continue
+    insert.run(user_id, item.material_name, item.category || '其他', item.specification || '', item.shelf_life || 0, item.storage_condition || '')
+    count++
+  }
+  res.json({ count, message: `成功导入 ${count} 条` })
+})
+
 app.get('/api/raw-materials', (req, res) => {
   const { user_id, keyword, category, risk_level, status } = req.query
   let sql = `SELECT rm.*, CASE WHEN rms.id IS NOT NULL THEN 1 ELSE 0 END AS hasStandard

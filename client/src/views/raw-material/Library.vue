@@ -9,6 +9,7 @@
         <div class="toolbar sub-toolbar">
           <span></span>
           <el-button type="primary" @click="openAdd">新增原料</el-button>
+          <el-button type="success" plain @click="showImport = true">📥 批量导入</el-button>
         </div>
 
     <!-- 统计卡片 -->
@@ -158,8 +159,6 @@
             <el-form-item label="储存条件"><el-select v-model="form.storage_condition" style="width:100%"><el-option label="冷藏 0~4°C" value="冷藏 0~4°C" /><el-option label="冷冻 ≤-18°C" value="冷冻 ≤-18°C" /><el-option label="常温 ≤25°C" value="常温 ≤25°C" /><el-option label="避光常温" value="避光常温" /></el-select></el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="执行标准"><el-input v-model="form.executive_standard" placeholder="如：GB 2707-2016" /></el-form-item>
-        <el-form-item label="过敏原信息"><el-input v-model="form.allergen_info" placeholder='如：含大豆、小麦，无则填"无"' /></el-form-item>
         <el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio value="启用">启用</el-radio><el-radio value="停用">停用</el-radio></el-radio-group></el-form-item>
       </el-form>
       <template #footer>
@@ -222,6 +221,20 @@
       <template #footer>
         <el-button @click="showStandard = false">取消</el-button>
         <el-button type="primary" @click="saveStandardConfig" :loading="savingStandard">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量导入弹窗 -->
+    <el-dialog title="📥 批量导入原料" v-model="showImport" width="650px">
+      <div class="import-hint">
+        <p>将 Excel 数据粘贴到下方（表头：原料名称 类别 规格型号 保质期月 储存条件）</p>
+        <p style="color:#909399;font-size:12px">列之间用 Tab 或逗号分隔，一行一个原料</p>
+      </div>
+      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期(月)&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
+      <div style="margin-top:10px;color:#67c23a" v-if="importResult">{{ importResult }}</div>
+      <template #footer>
+        <el-button @click="showImport = false">取消</el-button>
+        <el-button type="primary" @click="doImport" :loading="importing">开始导入</el-button>
       </template>
     </el-dialog>
       </el-tab-pane>
@@ -368,6 +381,39 @@ const standardPageSize = ref(20)
 
 // 验收标准
 const showStandard = ref(false)
+const showImport = ref(false)
+const importText = ref('')
+const importing = ref(false)
+const importResult = ref('')
+
+const doImport = async () => {
+  if (!importText.value.trim()) return
+  importing.value = true; importResult.value = ''
+  try {
+    const lines = importText.value.trim().split('\n').filter(l => l.trim())
+    const items = []
+    for (const line of lines) {
+      // 支持Tab或逗号分隔
+      const cols = line.includes('\t') ? line.split('\t') : line.split(',')
+      if (cols.length >= 2 && cols[0].trim()) {
+        items.push({
+          material_name: cols[0].trim(),
+          category: (cols[1] || '').trim(),
+          specification: (cols[2] || '').trim(),
+          shelf_life: parseInt(cols[3]) || 0,
+          storage_condition: (cols[4] || '').trim()
+        })
+      }
+    }
+    if (!items.length) { importResult.value = '未识别到有效数据'; return }
+    const res = await request.post('/raw-materials/batch', { items, user_id: userId })
+    importResult.value = `✅ 成功导入 ${res.count} 条`
+    importText.value = ''
+    fetchList()
+  } catch (e) {
+    importResult.value = '导入失败: ' + (e.response?.data?.message || e.message)
+  } finally { importing.value = false }
+}
 const currentMaterial = ref(null)
 const savingStandard = ref(false)
 const standardConfig = reactive({
@@ -388,7 +434,7 @@ const categories = [
 
 const form = reactive({
   material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
-  storage_condition: '', executive_standard: '', allergen_info: '', status: '启用'
+  storage_condition: '', status: '启用'
 })
 
 // 统计
@@ -495,7 +541,7 @@ function editRow(row) {
   Object.assign(form, {
     material_name: row.material_name, category: row.category, risk_level: row.risk_level,
     specification: row.specification, shelf_life: row.shelf_life, storage_condition: row.storage_condition,
-    executive_standard: row.executive_standard, allergen_info: row.allergen_info, status: row.status
+    status: row.status
   })
   showAdd.value = true
 }
@@ -549,7 +595,7 @@ function resetForm() {
   editingId.value = null
   Object.assign(form, {
     material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
-    storage_condition: '', executive_standard: '', allergen_info: '', status: '启用'
+    storage_condition: '', status: '启用'
   })
 }
 
