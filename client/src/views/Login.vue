@@ -13,9 +13,14 @@
           <p class="login-subtitle">智慧食品安全管理平台</p>
         </div>
 
-        <!-- Login Form -->
-        <form @submit.prevent="handleLogin">
-          <!-- 用户名 -->
+        <!-- Login Tabs -->
+        <div class="login-tabs">
+          <span :class="{ active: loginMode === 'password' }" @click="loginMode = 'password'">密码登录</span>
+          <span :class="{ active: loginMode === 'sms' }" @click="loginMode = 'sms'">验证码登录</span>
+        </div>
+
+        <!-- Password Login -->
+        <form v-if="loginMode === 'password'" @submit.prevent="handleLogin">
           <div class="form-group">
             <label class="form-label">用户名</label>
             <div class="input-wrapper">
@@ -90,6 +95,34 @@
           </button>
         </form>
 
+        <!-- SMS Login -->
+        <form v-if="loginMode === 'sms'" @submit.prevent="handleSmsLogin">
+          <div class="form-group">
+            <label class="form-label">手机号</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+              <input type="tel" class="form-input" placeholder="请输入手机号" v-model="smsForm.phone" @input="clearError" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">验证码</label>
+            <div class="input-row">
+              <input type="text" class="form-input code-input" placeholder="6位验证码" v-model="smsForm.code" @input="clearError" maxlength="6" />
+              <button type="button" class="send-code-btn" @click="sendCode" :disabled="codeCountdown > 0">
+                {{ codeCountdown > 0 ? codeCountdown + 's' : '获取验证码' }}
+              </button>
+            </div>
+          </div>
+          <div class="error-msg" v-if="errorMsg">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+            {{ errorMsg }}
+          </div>
+          <button type="submit" class="login-btn" :class="{ loading: loading }" :disabled="loading">
+            <span class="btn-text">登 录</span>
+            <span class="spinner"></span>
+          </button>
+        </form>
+
         <!-- 飞书登录 -->
         <div class="feishu-login">
           <div class="divider"><span>或</span></div>
@@ -120,6 +153,36 @@ const router = useRouter()
 const loading = ref(false)
 const showPassword = ref(false)
 const errorMsg = ref('')
+const loginMode = ref('password') // password | sms
+const codeCountdown = ref(0)
+let countdownTimer = null
+
+const smsForm = reactive({ phone: '', code: '' })
+
+const sendCode = async () => {
+  if (!/^1[3-9]\d{9}$/.test(smsForm.phone)) { errorMsg.value = '请输入正确的手机号'; return }
+  codeCountdown.value = 60
+  countdownTimer = setInterval(() => { codeCountdown.value--; if (codeCountdown.value <= 0) clearInterval(countdownTimer) }, 1000)
+  try {
+    await request.post('/auth/send-code', { phone: smsForm.phone })
+    ElMessage.success('验证码已发送（控制台可查看）')
+  } catch { codeCountdown.value = 0 }
+}
+
+const handleSmsLogin = async () => {
+  clearError()
+  if (!smsForm.phone) { errorMsg.value = '请输入手机号'; return }
+  if (!smsForm.code) { errorMsg.value = '请输入验证码'; return }
+  loading.value = true
+  try {
+    const res = await request.post('/auth/phone-login', { phone: smsForm.phone, code: smsForm.code })
+    localStorage.setItem('user', JSON.stringify(res.user))
+    localStorage.setItem('token', res.token)
+    ElMessage.success('登录成功')
+    router.push('/dashboard')
+  } catch { /* 拦截器处理 */ }
+  finally { loading.value = false }
+}
 
 const form = reactive({
   username: '',
@@ -532,6 +595,17 @@ onMounted(() => {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ===== 登录Tabs ===== */
+.login-tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; }
+.login-tabs span { flex: 1; text-align: center; padding: 10px 0; font-size: 14px; color: #9ca3af; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.login-tabs span.active { color: #5b8def; border-bottom-color: #5b8def; font-weight: 600; }
+
+/* ===== 验证码 ===== */
+.input-row { display: flex; gap: 10px; }
+.code-input { flex: 1; padding: 0 14px !important; }
+.send-code-btn { flex-shrink: 0; height: 48px; padding: 0 16px; border: 1px solid #5b8def; border-radius: 10px; background: white; color: #5b8def; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.send-code-btn:disabled { color: #c0c4cc; border-color: #e8e8f0; cursor: not-allowed; }
 
 /* ===== 飞书登录 ===== */
 .feishu-login { margin-bottom: 12px; }

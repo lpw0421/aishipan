@@ -423,12 +423,69 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     db.prepare("UPDATE users SET token = ?, token_expire = datetime('now', '+7 days') WHERE id = ?").run(token, user.id)
 
     // 重定向到前端，带上 token 和用户信息
-    const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar, role: user.role }))
+    const userInfo = encodeURIComponent(JSON.stringify({ id: user.id, username: user.username, name: user.name || name, avatar: user.avatar || avatar, role: user.role, phone: user.phone || '' }))
     res.redirect(`/login?feishu_login=1&token=${token}&user=${userInfo}`)
   } catch (e) {
     console.error('[飞书登录]', e.message)
     res.redirect('/login?error=登录异常')
   }
+})
+
+// ===== 短信验证码 =====
+// 发送验证码
+app.post('/api/auth/send-code', strictLimiter, (req, res) => {
+  const { phone } = req.body
+  if (!phone || !/^1[3-9]\d{9}$/.test(phone)) return res.status(400).json({ message: '请输入正确的手机号' })
+
+  // 检查60秒内是否已发送
+  const recent = db.prepare("SELECT id FROM sms_codes WHERE phone = ? AND created_at > datetime('now', '-60 seconds')").get(phone)
+  if (recent) return res.status(429).json({ message: '请60秒后再试' })
+
+  const code = String(Math.floor(100000 + Math.random() * 900000))
+  db.prepare("INSERT INTO sms_codes (phone, code, expires_at) VALUES (?, ?, datetime('now', '+5 minutes'))").run(phone, code)
+
+  // TODO: 接入阿里云短信服务
+  console.log(`[短信] ${phone} 验证码: ${code}`)
+
+  res.json({ message: '验证码已发送', debug_code: code }) // debug_code 上线后删除
+})
+
+// 验证码登录
+app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
+  const { phone, code } = req.body
+  if (!phone || !code) return res.status(400).json({ message: '请输入手机号和验证码' })
+
+  const valid = db.prepare("SELECT id FROM sms_codes WHERE phone = ? AND code = ? AND used = 0 AND expires_at > datetime('now')").get(phone, code)
+  if (!valid) return res.status(400).json({ message: '验证码错误或已过期' })
+
+  db.prepare('UPDATE sms_codes SET used = 1 WHERE id = ?').run(valid.id)
+
+  // 查找或创建用户
+  let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
+  if (!user) {
+    const username = 'u' + phone.substring(7)
+    db.prepare("INSERT INTO users (username, password, phone, role) VALUES (?, '', ?, 'user')").run(username, phone)
+    user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
+  }
+
+  const token = crypto.randomBytes(32).toString('hex')
+  db.prepare("UPDATE users SET token = ?, token_expire = datetime('now', '+7 days') WHERE id = ?").run(token, user.id)
+
+  res.json({ message: '登录成功', token, user: { id: user.id, username: user.username, name: user.name || '', phone: user.phone || '', role: user.role, avatar: user.avatar || '' } })
+})
+
+// 绑定手机号（飞书登录后）
+app.post('/api/auth/bind-phone', (req, res) => {
+  const { user_id, phone, code } = req.body
+  if (!user_id || !phone || !code) return res.status(400).json({ message: '参数不完整' })
+
+  const valid = db.prepare("SELECT id FROM sms_codes WHERE phone = ? AND code = ? AND used = 0 AND expires_at > datetime('now')").get(phone, code)
+  if (!valid) return res.status(400).json({ message: '验证码错误或已过期' })
+
+  db.prepare('UPDATE sms_codes SET used = 1 WHERE id = ?').run(valid.id)
+  db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(phone, user_id)
+
+  res.json({ message: '手机号绑定成功', phone })
 })
 
 // ===== 登录接口 =====

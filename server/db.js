@@ -27,6 +27,16 @@ try { db.exec('ALTER TABLE users ADD COLUMN token_expire TEXT DEFAULT ""') } cat
 try { db.exec('ALTER TABLE users ADD COLUMN name TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "user"') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ""') } catch {}
+
+// 短信验证码表
+db.exec(`CREATE TABLE IF NOT EXISTS sms_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL,
+  code TEXT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 // 第一个用户自动设为 admin
 const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users').get().cnt
 if (userCount === 0) {

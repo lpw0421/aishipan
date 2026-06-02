@@ -333,34 +333,23 @@ module.exports = async function feishuWebhook(req, res) {
               fs.writeFileSync(tmpIn, audioBuf)
               // 转码为16k mono WAV
               execSync(`ffmpeg -y -i ${tmpIn} -acodec pcm_s16le -ac 1 -ar 16000 ${tmpWav} 2>/dev/null`)
-              // 2) 上传WAV到飞书获取file_id
-              const FormData = require('form-data')
-              const form = new FormData()
-              form.append('file', fs.createReadStream(tmpWav))
-              form.append('file_name', 'audio.wav')
-              const uploadRes = await fetch('https://open.feishu.cn/open-apis/im/v1/files', {
-                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form
-              })
-              let fileId = ''
-              const upData = await uploadRes.json().catch(() => ({}))
-              if (uploadRes.ok && upData.data?.file_key) {
-                fileId = upData.data.file_key
-              } else {
-                console.log('[语音] 上传失败:', uploadRes.status, JSON.stringify(upData).substring(0,200))
-              }
+              const wavBuf = fs.readFileSync(tmpWav)
               fs.unlinkSync(tmpIn); fs.unlinkSync(tmpWav)
-              console.log('[语音] 上传file_id:', fileId || '失败')
-              // 3) 语音识别
-              if (fileId) {
-                const sttRes = await fetch('https://open.feishu.cn/open-apis/speech_to_text/v1/speech/file_recognize', {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ speech: { file_id: fileId }, config: { engine_type: '16k_auto', enable_punctuation: true } })
+              // stream_recognize 一次发送完整音频
+              const streamId = Date.now().toString()
+              const sttRes = await fetch('https://open.feishu.cn/open-apis/speech_to_text/v1/speech/stream_recognize', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  speech: wavBuf.toString('base64'),
+                  config: { stream_id: streamId, sequence_id: 1, action: 1, engine_type: '16k_auto', format: 'pcm', enable_punctuation: true }
                 })
-                if (sttRes.ok) {
-                  const sttData = await sttRes.json()
-                  userText = sttData.data?.text || ''
-                }
+              })
+              if (sttRes.ok) {
+                const sttData = await sttRes.json()
+                userText = sttData.data?.text || ''
+              } else {
+                console.log('[语音] ASR错误:', sttRes.status, await sttRes.text().catch(()=>''))
               }
               console.log('[语音] 识别:', userText || '(空)')
             }
