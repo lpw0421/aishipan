@@ -170,8 +170,12 @@ const sendCode = async () => {
   codeCountdown.value = 60
   countdownTimer = setInterval(() => { codeCountdown.value--; if (codeCountdown.value <= 0) clearInterval(countdownTimer) }, 1000)
   try {
-    await request.post('/auth/send-code', { phone: smsForm.phone })
-    ElMessage.success('验证码已发送（控制台可查看）')
+    const res = await request.post('/auth/send-code', { phone: smsForm.phone })
+    if (res.debug_code) {
+      ElMessage.success('验证码: ' + res.debug_code)
+    } else {
+      ElMessage.success('验证码已发送')
+    }
   } catch { codeCountdown.value = 0 }
 }
 
