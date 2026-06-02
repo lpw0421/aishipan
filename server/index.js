@@ -84,19 +84,19 @@ const strictLimiter = rateLimit({
 
 // 团队数据共享中间件：同一团队的用户共享数据
 app.use('/api', (req, res, next) => {
-  const userId = req.query.user_id || req.body.user_id
-  if (userId && userId != 1) {
-    const user = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(userId)
-    if (user && user.team_id && user.role !== 'admin') {
-      // 找到团队管理员
-      const admin = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'admin' LIMIT 1").get(user.team_id)
-      if (admin && admin.id != userId) {
-        // 替换为管理员ID，让团队成员共享数据
-        if (req.query.user_id) req.query.user_id = String(admin.id)
-        if (req.body.user_id) req.body.user_id = String(admin.id)
+  try {
+    const userId = req.query.user_id || req.body.user_id
+    if (userId && userId != 1) {
+      const user = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(userId)
+      if (user && user.team_id && user.role !== 'admin') {
+        const admin = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'admin' LIMIT 1").get(user.team_id)
+        if (admin && admin.id != userId) {
+          if (req.query.user_id) req.query.user_id = String(admin.id)
+          if (req.body.user_id) req.body.user_id = String(admin.id)
+        }
       }
     }
-  }
+  } catch (e) { /* 中间件错误不影响业务 */ }
   next()
 })
 
