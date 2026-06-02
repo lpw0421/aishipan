@@ -485,39 +485,53 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
   }
 })
 
-// ===== 阿里云短信 =====
-let smsClient = null
-try {
-  const Core = require('@alicloud/pop-core')
-  if (process.env.ALIBABA_ACCESS_KEY_ID && process.env.ALIBABA_ACCESS_KEY_SECRET) {
-    smsClient = new Core({
-      accessKeyId: process.env.ALIBABA_ACCESS_KEY_ID,
-      accessKeySecret: process.env.ALIBABA_ACCESS_KEY_SECRET,
-      endpoint: 'https://dysmsapi.aliyuncs.com',
-      apiVersion: '2017-05-25'
-    })
-    console.log('📱 阿里云短信已就绪')
-  }
-} catch (e) { console.log('📱 短信SDK未配置') }
+// ===== 网易云信短信 =====
+async function sendYunXinSms(phone, code) {
+  const appKey = process.env.YUNXIN_APP_KEY
+  const appSecret = process.env.YUNXIN_APP_SECRET
+  const templateId = process.env.YUNXIN_TEMPLATE_ID
 
-async function sendSms(phone, code) {
-  if (!smsClient || !process.env.SMS_SIGN_NAME || !process.env.SMS_TEMPLATE_CODE) {
+  if (!appKey || !appSecret || !templateId) {
     console.log(`[短信] ${phone} 验证码: ${code}`)
-    return { sent: false, message: '短信服务未配置，验证码已打印到控制台' }
+    return { sent: false, message: '短信服务未配置' }
   }
+
+  const nonce = Math.random().toString(36).substring(2)
+  const curTime = String(Math.floor(Date.now() / 1000))
+  const checkSum = crypto.createHash('sha1').update(appSecret + nonce + curTime).digest('hex')
+
+  const body = new URLSearchParams({
+    templateid: templateId,
+    mobile: phone,
+    params: JSON.stringify([code])
+  })
+
   try {
-    const result = await smsClient.request('SendSms', {
-      PhoneNumbers: phone,
-      SignName: process.env.SMS_SIGN_NAME,
-      TemplateCode: process.env.SMS_TEMPLATE_CODE,
-      TemplateParam: JSON.stringify({ code })
-    }, { method: 'POST' })
-    return { sent: result.Code === 'OK', message: result.Code === 'OK' ? '验证码已发送' : result.Message }
+    const res = await fetch('https://api.netease.im/sms/sendtemplate.action', {
+      method: 'POST',
+      headers: {
+        'AppKey': appKey,
+        'Nonce': nonce,
+        'CurTime': curTime,
+        'CheckSum': checkSum,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: body.toString()
+    })
+    const data = await res.json()
+    console.log(`[短信] ${phone} 结果: code=${data.code}`)
+    if (data.code === 200) return { sent: true, message: '验证码已发送' }
+    return { sent: false, message: data.msg || '发送失败' }
   } catch (e) {
-    console.log(`[短信] 发送失败:`, e.message)
+    console.log(`[短信] 发送异常:`, e.message)
     console.log(`[短信] ${phone} 验证码: ${code}`)
-    return { sent: false, message: '短信发送失败，验证码: ' + code }
+    return { sent: false, message: '短信服务异常' }
   }
+}
+
+// 统一短信入口
+async function sendSms(phone, code) {
+  return sendYunXinSms(phone, code)
 }
 
 // ===== 短信验证码 =====
