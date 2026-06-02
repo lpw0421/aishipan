@@ -94,7 +94,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="specification" label="规格" width="100" show-overflow-tooltip />
-        <el-table-column prop="shelf_life" label="保质期(月)" width="100" />
+        <el-table-column prop="shelf_life" label="保质期(天)" width="100" />
         <el-table-column prop="storage_condition" label="储存条件" width="110" show-overflow-tooltip>
           <template #default="{row}">
             <el-tag size="small" :type="row.storage_condition.includes('冻')?'':'success'" effect="plain">
@@ -153,7 +153,7 @@
         <el-form-item label="规格型号"><el-input v-model="form.specification" placeholder="如：25kg/袋" /></el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="保质期(月)"><el-input-number v-model="form.shelf_life" :min="0" style="width:100%" /></el-form-item>
+            <el-form-item label="保质期(天)"><el-input-number v-model="form.shelf_life" :min="0" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="储存条件"><el-select v-model="form.storage_condition" style="width:100%"><el-option label="冷藏 0~4°C" value="冷藏 0~4°C" /><el-option label="冷冻 ≤-18°C" value="冷冻 ≤-18°C" /><el-option label="常温 ≤25°C" value="常温 ≤25°C" /><el-option label="避光常温" value="避光常温" /></el-select></el-form-item>
@@ -227,10 +227,10 @@
     <!-- 批量导入弹窗 -->
     <el-dialog title="📥 批量导入原料" v-model="showImport" width="650px">
       <div class="import-hint">
-        <p>将 Excel 数据粘贴到下方（表头：原料名称 类别 规格型号 保质期月 储存条件）</p>
+        <p>将 Excel 数据粘贴到下方（表头：原料名称 类别 规格型号 保质期天 储存条件）</p>
         <p style="color:#909399;font-size:12px">列之间用 Tab 或逗号分隔，一行一个原料</p>
       </div>
-      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期(月)&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
+      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期(天)&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
       <div style="margin-top:10px;color:#67c23a" v-if="importResult">{{ importResult }}</div>
       <template #footer>
         <el-button @click="showImport = false">取消</el-button>
