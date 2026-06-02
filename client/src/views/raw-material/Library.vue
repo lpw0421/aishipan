@@ -55,7 +55,7 @@
         <el-option label="启用" value="启用" /><el-option label="停用" value="停用" />
       </el-select>
       <el-select v-model="filterStorage" placeholder="储存条件" style="width:140px" clearable @change="fetchList">
-        <el-option label="冷藏" value="冷藏" /><el-option label="冷冻" value="冷冻" /><el-option label="常温" value="常温" /><el-option label="避光" value="避光" />
+        <el-option label="常温" value="常温" /><el-option label="冷藏" value="冷藏" /><el-option label="冷冻" value="冷冻" />
       </el-select>
     </el-card>
 
@@ -99,7 +99,7 @@
         </el-table-column>
         <el-table-column prop="storage_condition" label="储存条件" width="110" show-overflow-tooltip>
           <template #default="{row}">
-            <el-tag size="small" :type="row.storage_condition.includes('冻')?'':'success'" effect="plain">
+            <el-tag size="small" :type="row.storage_condition === '冷冻' ? '' : row.storage_condition === '冷藏' ? 'warning' : 'success'" effect="plain">
               {{ row.storage_condition }}
             </el-tag>
           </template>
@@ -165,7 +165,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="储存条件"><el-select v-model="form.storage_condition" style="width:100%"><el-option label="冷藏 0~4°C" value="冷藏 0~4°C" /><el-option label="冷冻 ≤-18°C" value="冷冻 ≤-18°C" /><el-option label="常温 ≤25°C" value="常温 ≤25°C" /><el-option label="避光常温" value="避光常温" /></el-select></el-form-item>
+            <el-form-item label="储存条件"><el-select v-model="form.storage_condition" style="width:100%"><el-option label="常温" value="常温" /><el-option label="冷藏" value="冷藏" /><el-option label="冷冻" value="冷冻" /></el-select></el-form-item>
           </el-col>
         </el-row>
         <el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio value="启用">启用</el-radio><el-radio value="停用">停用</el-radio></el-radio-group></el-form-item>
@@ -239,7 +239,7 @@
         <p>将 Excel 数据粘贴到下方（表头：原料名称 类别 规格型号 保质期天 储存条件）</p>
         <p style="color:#909399;font-size:12px">列之间用 Tab 或逗号分隔，一行一个原料</p>
       </div>
-      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
+      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;365&#9;冷冻&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;540&#9;常温" />
       <div style="margin-top:10px;color:#67c23a" v-if="importResult">{{ importResult }}</div>
       <template #footer>
         <el-button @click="showImport = false">取消</el-button>
