@@ -468,7 +468,6 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
       db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(user.id, teamId)
     } else {
-    } else {
       db.prepare('UPDATE users SET name = ?, avatar = ?, role = ? WHERE open_id = ?').run(name, avatar, isAdmin ? 'admin' : 'user', openId)
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     }
