@@ -157,7 +157,8 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item command="settings">账户设置</el-dropdown-item>
+              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -247,7 +248,9 @@ const userId = user.id
 
 // 下拉菜单命令处理
 const handleCommand = (command) => {
-  if (command === 'logout') {
+  if (command === 'settings') {
+    router.push('/settings')
+  } else if (command === 'logout') {
     localStorage.removeItem('user')
     router.push('/login')
   }

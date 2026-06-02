@@ -5,6 +5,7 @@ const routes = [
   // 登录/注册（无需 Layout 包裹）
   { path: '/login', component: () => import('../views/Login.vue') },
   { path: '/register', component: () => import('../views/Register.vue') },
+  { path: '/settings', component: () => import('../views/Settings.vue') },
 
   // 后台管理（MainLayout 统一包裹，子页面渲染到 <router-view>）
   {

@@ -358,6 +358,28 @@ app.get('/api/health', (req, res) => {
 
 // 飞书机器人 webhook 已移至中间件之前（绕过 XSS sanitize）
 
+// ===== 用户设置 =====
+// 修改密码
+app.put('/api/user/password', (req, res) => {
+  const { user_id, oldPassword, newPassword } = req.body
+  if (!user_id || !oldPassword || !newPassword) return res.status(400).json({ message: '参数不完整' })
+  if (newPassword.length < 6) return res.status(400).json({ message: '新密码至少6位' })
+  const user = db.prepare('SELECT password FROM users WHERE id = ?').get(user_id)
+  if (!user || user.password !== hashPassword(oldPassword)) return res.status(400).json({ message: '原密码错误' })
+  db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(newPassword), user_id)
+  res.json({ message: '密码修改成功' })
+})
+
+// 修改个人信息
+app.put('/api/user/profile', (req, res) => {
+  const { user_id, username, name } = req.body
+  if (!user_id || !username) return res.status(400).json({ message: '用户名不能为空' })
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, user_id)
+  if (existing) return res.status(400).json({ message: '用户名已被占用' })
+  db.prepare('UPDATE users SET username = ?, name = ? WHERE id = ?').run(username, name || '', user_id)
+  res.json({ message: '修改成功' })
+})
+
 // ===== 注册接口 =====
 app.post('/api/auth/register', strictLimiter, (req, res) => {
   const { username, password } = req.body
