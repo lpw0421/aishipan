@@ -99,7 +99,7 @@
         </el-sub-menu>
       </el-menu>
       <!-- 邀请码 -->
-      <div v-if="userRole === 'admin'" class="invite-section">
+      <div v-if="inviteCode" class="invite-section">
         <div class="invite-label">📨 邀请成员加入</div>
         <div class="invite-code-display">{{ inviteCode || '加载中...' }}</div>
         <div class="invite-hint">复制邀请码发给团队成员</div>
