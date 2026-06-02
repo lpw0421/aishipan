@@ -152,7 +152,17 @@
             <el-form-item label="风险等级"><el-select v-model="form.risk_level" style="width:100%"><el-option label="高" value="高" /><el-option label="中" value="中" /><el-option label="低" value="低" /></el-select></el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="规格型号"><el-input v-model="form.specification" placeholder="如：25kg/袋" /></el-form-item>
+        <el-form-item label="规格型号">
+          <div style="display:flex;gap:8px">
+            <el-input-number v-model="form.spec_qty" :min="0" :precision="2" style="flex:1" placeholder="数量" />
+            <el-select v-model="form.spec_unit" style="width:90px" placeholder="单位">
+              <el-option label="kg" value="kg" /><el-option label="g" value="g" /><el-option label="L" value="L" /><el-option label="ml" value="ml" />
+            </el-select>
+            <el-select v-model="form.spec_pack" style="width:100px" placeholder="包装">
+              <el-option label="/袋" value="/袋" /><el-option label="/桶" value="/桶" /><el-option label="/箱" value="/箱" /><el-option label="/瓶" value="/瓶" /><el-option label="/包" value="/包" /><el-option label="散装" value="散装" />
+            </el-select>
+          </div>
+        </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="保质期">
@@ -391,6 +401,19 @@ const standardPageSize = ref(20)
 // 验收标准
 const showStandard = ref(false)
 const showImport = ref(false)
+
+// 拆解规格字符串 "25kg/袋" → {spec_qty:25, spec_unit:'kg', spec_pack:'/袋'}
+function parseSpec(spec) {
+  if (!spec) return { spec_qty: null, spec_unit: 'kg', spec_pack: '/袋' }
+  if (spec === '散装') return { spec_qty: null, spec_unit: 'kg', spec_pack: '散装' }
+  const match = spec.match(/^([\d.]+)\s*(kg|g|L|ml|升|千克|公斤|克)(\s*\/\s*袋|\s*\/\s*桶|\s*\/\s*箱|\s*\/\s*瓶|\s*\/\s*包)?$/)
+  if (match) {
+    let pack = (match[3] || '/袋').replace(/\s/g, '')
+    const unitMap = { '升': 'L', '千克': 'kg', '公斤': 'kg', '克': 'g' }
+    return { spec_qty: parseFloat(match[1]), spec_unit: unitMap[match[2]] || match[2], spec_pack: pack }
+  }
+  return { spec_qty: null, spec_unit: 'kg', spec_pack: '/袋' }
+}
 const importText = ref('')
 const importing = ref(false)
 const importResult = ref('')
@@ -442,8 +465,8 @@ const categories = [
 ]
 
 const form = reactive({
-  material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
-  storage_condition: '', shelf_life_unit: '天', status: '启用'
+  material_name: '', category: '其他', risk_level: '中', specification: '', spec_qty: null, spec_unit: 'kg', spec_pack: '/袋',
+  shelf_life: 0, storage_condition: '', shelf_life_unit: '天', status: '启用'
 })
 
 // 统计
@@ -550,6 +573,8 @@ function editRow(row) {
   Object.assign(form, {
     material_name: row.material_name, category: row.category, risk_level: row.risk_level,
     specification: row.specification, shelf_life: row.shelf_life, shelf_life_unit: row.shelf_life_unit || '天', storage_condition: row.storage_condition,
+    // 拆解规格
+    ...parseSpec(row.specification),
     status: row.status
   })
   showAdd.value = true
@@ -585,6 +610,10 @@ function exportExcel() {
 
 async function save() {
   if (!form.material_name) return ElMessage.warning('请填写原料名称')
+  // 组合规格: 数量 + 单位 + 包装
+  if (form.spec_qty && form.spec_unit) {
+    form.specification = form.spec_pack === '散装' ? '散装' : `${form.spec_qty}${form.spec_unit}${form.spec_pack}`
+  }
   saving.value = true
   try {
     if (editingId.value) {
