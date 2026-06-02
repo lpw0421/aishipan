@@ -384,7 +384,7 @@ app.post('/api/auth/register', strictLimiter, (req, res) => {
   }
   if (!teamId) {
     const code = 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase()
-    const teamResult = db.prepare('INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, 0)').run(username + '的团队', code)
+    const teamResult = db.prepare('INSERT INTO teams (name, invite_code) VALUES (?, ?)').run(username + '的团队', code)
     teamId = teamResult.lastInsertRowid
   }
 
@@ -479,7 +479,7 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     if (!user) {
       const username = 'fs_' + openId.substring(0, 12)
       // 新用户创建自己的团队
-      const teamResult = db.prepare("INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, ?)").run(name + '的团队', 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase(), 0)
+      const teamResult = db.prepare("INSERT INTO teams (name, invite_code) VALUES (?, ?)").run(name + '的团队', 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase())
       const teamId = teamResult.lastInsertRowid
       db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role, team_id) VALUES (?, '', ?, ?, ?, ?, ?)").run(username, openId, name, avatar, 'admin', teamId)
       // 更新团队owner
@@ -590,7 +590,7 @@ app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
       if (team) { teamId = team.id }
     }
     if (!teamId) {
-      const result = db.prepare("INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, 0)").run('手机用户' + phone.substring(7), 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase())
+      const result = db.prepare("INSERT INTO teams (name, invite_code) VALUES (?, ?)").run('手机用户' + phone.substring(7), 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase())
       teamId = result.lastInsertRowid
     }
     const role = invite_code ? 'user' : 'admin'

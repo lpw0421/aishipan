@@ -37,14 +37,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS teams (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL DEFAULT '默认团队',
   invite_code TEXT NOT NULL UNIQUE,
-  owner_id INTEGER NOT NULL,
+  owner_id INTEGER,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_id) REFERENCES users(id))`)
 
 // 为已存在的管理员创建默认团队
 const existingTeam = db.prepare('SELECT id FROM teams WHERE id = 1').get()
 if (!existingTeam) {
-  db.prepare("INSERT INTO teams (id, name, invite_code, owner_id) VALUES (1, '默认企业', ?, 1)").run('TEAM' + Math.random().toString(36).substring(2, 8).toUpperCase())
+  db.prepare("INSERT INTO teams (id, name, invite_code) VALUES (1, '默认企业', ?)").run('TEAM' + Math.random().toString(36).substring(2, 8).toUpperCase())
 }
 
 // 短信验证码表
