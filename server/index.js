@@ -3934,10 +3934,10 @@ app.post('/api/raw-materials/batch', (req, res) => {
   const { items, user_id } = req.body
   if (!items || !items.length) return res.status(400).json({ message: '无数据' })
   let count = 0
-  const insert = db.prepare('INSERT INTO raw_materials (user_id, material_name, category, specification, shelf_life, storage_condition) VALUES (?,?,?,?,?,?)')
+  const insert = db.prepare('INSERT INTO raw_materials (user_id, material_name, category, specification, shelf_life, shelf_life_unit, storage_condition) VALUES (?,?,?,?,?,?,?)')
   for (const item of items) {
     if (!item.material_name) continue
-    insert.run(user_id, item.material_name, item.category || '其他', item.specification || '', item.shelf_life || 0, item.storage_condition || '')
+    insert.run(user_id, item.material_name, item.category || '其他', item.specification || '', item.shelf_life || 0, item.shelf_life_unit || '天', item.storage_condition || '')
     count++
   }
   res.json({ count, message: `成功导入 ${count} 条` })
@@ -3960,25 +3960,25 @@ app.get('/api/raw-materials', (req, res) => {
 })
 
 app.post('/api/raw-materials', (req, res) => {
-  const { user_id, material_name, category, risk_level, specification, shelf_life, storage_condition, executive_standard, allergen_info, suppliers } = req.body
+  const { user_id, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers } = req.body
   if (!material_name) return res.status(400).json({ message: '请填写原料名称' })
   // 自动生成原料编号
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM raw_materials WHERE user_id = ?').get(user_id).cnt
   const material_number = 'RM-' + String(count + 1).padStart(3, '0')
   db.prepare(
-    'INSERT INTO raw_materials (user_id, material_number, material_name, category, risk_level, specification, shelf_life, storage_condition, executive_standard, allergen_info, suppliers) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-  ).run(user_id, material_number, material_name, category || '其他', risk_level || '中', specification || '', shelf_life || 0, storage_condition || '', executive_standard || '', allergen_info || '', JSON.stringify(suppliers || []))
+    'INSERT INTO raw_materials (user_id, material_number, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, material_number, material_name, category || '其他', risk_level || '中', specification || '', shelf_life || 0, shelf_life_unit || '天', storage_condition || '', executive_standard || '', allergen_info || '', JSON.stringify(suppliers || []))
   res.json({ message: '原料添加成功' })
 })
 
 app.put('/api/raw-materials/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, material_name, category, risk_level, specification, shelf_life, storage_condition, executive_standard, allergen_info, suppliers, status } = req.body
+  const { user_id, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers, status } = req.body
   const existing = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '原料不存在' })
   db.prepare(
-    'UPDATE raw_materials SET material_name=?, category=?, risk_level=?, specification=?, shelf_life=?, storage_condition=?, executive_standard=?, allergen_info=?, suppliers=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
-  ).run(material_name || existing.material_name, category || existing.category, risk_level || existing.risk_level, specification || existing.specification, shelf_life != null ? shelf_life : existing.shelf_life, storage_condition || existing.storage_condition, executive_standard || existing.executive_standard, allergen_info || existing.allergen_info, suppliers ? JSON.stringify(suppliers) : existing.suppliers, status || existing.status, id)
+    'UPDATE raw_materials SET material_name=?, category=?, risk_level=?, specification=?, shelf_life=?, shelf_life_unit=?, storage_condition=?, executive_standard=?, allergen_info=?, suppliers=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
+  ).run(material_name || existing.material_name, category || existing.category, risk_level || existing.risk_level, specification || existing.specification, shelf_life != null ? shelf_life : existing.shelf_life, shelf_life_unit || existing.shelf_life_unit || '天', storage_condition || existing.storage_condition, executive_standard || existing.executive_standard, allergen_info || existing.allergen_info, suppliers ? JSON.stringify(suppliers) : existing.suppliers, status || existing.status, id)
   res.json({ message: '原料更新成功' })
 })
 

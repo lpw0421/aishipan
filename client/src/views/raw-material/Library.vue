@@ -94,7 +94,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="specification" label="规格" width="100" show-overflow-tooltip />
-        <el-table-column prop="shelf_life" label="保质期(天)" width="100" />
+        <el-table-column label="保质期" width="110">
+          <template #default="{row}">{{ row.shelf_life }} {{ row.shelf_life_unit || '天' }}</template>
+        </el-table-column>
         <el-table-column prop="storage_condition" label="储存条件" width="110" show-overflow-tooltip>
           <template #default="{row}">
             <el-tag size="small" :type="row.storage_condition.includes('冻')?'':'success'" effect="plain">
@@ -153,7 +155,14 @@
         <el-form-item label="规格型号"><el-input v-model="form.specification" placeholder="如：25kg/袋" /></el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="保质期(天)"><el-input-number v-model="form.shelf_life" :min="0" style="width:100%" /></el-form-item>
+            <el-form-item label="保质期">
+              <div style="display:flex;gap:8px">
+                <el-input-number v-model="form.shelf_life" :min="0" style="flex:1" />
+                <el-select v-model="form.shelf_life_unit" style="width:80px">
+                  <el-option label="天" value="天" /><el-option label="月" value="月" /><el-option label="年" value="年" />
+                </el-select>
+              </div>
+            </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="储存条件"><el-select v-model="form.storage_condition" style="width:100%"><el-option label="冷藏 0~4°C" value="冷藏 0~4°C" /><el-option label="冷冻 ≤-18°C" value="冷冻 ≤-18°C" /><el-option label="常温 ≤25°C" value="常温 ≤25°C" /><el-option label="避光常温" value="避光常温" /></el-select></el-form-item>
@@ -230,7 +239,7 @@
         <p>将 Excel 数据粘贴到下方（表头：原料名称 类别 规格型号 保质期天 储存条件）</p>
         <p style="color:#909399;font-size:12px">列之间用 Tab 或逗号分隔，一行一个原料</p>
       </div>
-      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期(天)&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
+      <el-input v-model="importText" type="textarea" :rows="10" placeholder="原料名称&#9;类别&#9;规格型号&#9;保质期&#9;储存条件&#10;冷冻鸡胸肉&#9;畜禽肉类&#9;25kg/袋&#9;12&#9;冷冻≤-18°C&#10;大豆油&#9;食用油脂&#9;20L/桶&#9;18&#9;常温≤25°C" />
       <div style="margin-top:10px;color:#67c23a" v-if="importResult">{{ importResult }}</div>
       <template #footer>
         <el-button @click="showImport = false">取消</el-button>
@@ -434,7 +443,7 @@ const categories = [
 
 const form = reactive({
   material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
-  storage_condition: '', status: '启用'
+  storage_condition: '', shelf_life_unit: '天', status: '启用'
 })
 
 // 统计
@@ -540,7 +549,7 @@ function editRow(row) {
   editingId.value = row.id
   Object.assign(form, {
     material_name: row.material_name, category: row.category, risk_level: row.risk_level,
-    specification: row.specification, shelf_life: row.shelf_life, storage_condition: row.storage_condition,
+    specification: row.specification, shelf_life: row.shelf_life, shelf_life_unit: row.shelf_life_unit || '天', storage_condition: row.storage_condition,
     status: row.status
   })
   showAdd.value = true
@@ -595,7 +604,7 @@ function resetForm() {
   editingId.value = null
   Object.assign(form, {
     material_name: '', category: '其他', risk_level: '中', specification: '', shelf_life: 0,
-    storage_condition: '', status: '启用'
+    storage_condition: '', shelf_life_unit: '天', status: '启用'
   })
 }
 
