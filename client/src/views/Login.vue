@@ -105,6 +105,12 @@
             </div>
           </div>
           <div class="form-group">
+            <label class="form-label">邀请码 <span style="font-weight:normal;color:#9ca3af;font-size:11px">(加入已有团队需填写)</span></label>
+            <div class="input-wrapper">
+              <input type="text" class="form-input" placeholder="AI开头的邀请码（选填）" v-model="smsForm.invite_code" @input="clearError" />
+            </div>
+          </div>
+          <div class="form-group">
             <label class="form-label">验证码</label>
             <div class="input-row">
               <input type="text" class="form-input code-input" placeholder="6位验证码" v-model="smsForm.code" @input="clearError" maxlength="6" />
@@ -157,7 +163,7 @@ const loginMode = ref('password') // password | sms
 const codeCountdown = ref(0)
 let countdownTimer = null
 
-const smsForm = reactive({ phone: '', code: '' })
+const smsForm = reactive({ phone: '', code: '', invite_code: '' })
 
 const sendCode = async () => {
   if (!/^1[3-9]\d{9}$/.test(smsForm.phone)) { errorMsg.value = '请输入正确的手机号'; return }
@@ -175,7 +181,7 @@ const handleSmsLogin = async () => {
   if (!smsForm.code) { errorMsg.value = '请输入验证码'; return }
   loading.value = true
   try {
-    const res = await request.post('/auth/phone-login', { phone: smsForm.phone, code: smsForm.code })
+    const res = await request.post('/auth/phone-login', { phone: smsForm.phone, code: smsForm.code, invite_code: smsForm.invite_code })
     localStorage.setItem('user', JSON.stringify(res.user))
     localStorage.setItem('token', res.token)
     ElMessage.success('登录成功')

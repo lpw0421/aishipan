@@ -98,6 +98,12 @@
           </el-menu-item>
         </el-sub-menu>
       </el-menu>
+      <!-- 邀请码 -->
+      <div v-if="userRole === 'admin'" class="invite-section">
+        <div class="invite-label">📨 邀请成员加入</div>
+        <div class="invite-code-display">{{ inviteCode || '加载中...' }}</div>
+        <div class="invite-hint">复制邀请码发给团队成员</div>
+      </div>
     </el-aside>
 
     <!-- ===== 右侧区域 ===== -->
@@ -227,6 +233,16 @@ const userStr = localStorage.getItem('user')
 const user = userStr ? JSON.parse(userStr) : {}
 const username = user.username || user.name || '未知用户'
 const userRole = user.role || 'user'
+const inviteCode = ref('')
+
+// 获取邀请码
+const fetchTeamInfo = async () => {
+  try {
+    const res = await request.get('/team/info', { params: { user_id: user.id } })
+    if (res.team) inviteCode.value = res.team.invite_code
+  } catch {}
+}
+onMounted(fetchTeamInfo)
 const userId = user.id
 
 // 下拉菜单命令处理
@@ -420,6 +436,12 @@ onUnmounted(() => {
   padding: 20px;
   overflow-y: auto;
 }
+
+/* ===== 邀请码 ===== */
+.invite-section { padding: 12px 16px; margin: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.08); text-align: center; }
+.invite-label { font-size: 12px; color: #93c5fd; margin-bottom: 4px; }
+.invite-code-display { font-size: 15px; font-weight: 700; color: #fff; font-family: monospace; letter-spacing: 1px; background: rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 4px; cursor: pointer; user-select: all; }
+.invite-hint { font-size: 10px; color: #bfcbd9; margin-top: 4px; }
 
 /* ===== 移动端适配 ===== */
 @media (max-width: 768px) {

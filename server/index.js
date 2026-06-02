@@ -379,6 +379,37 @@ app.post('/api/auth/register', strictLimiter, (req, res) => {
   res.json({ message: '注册成功', userId: result.lastInsertRowid })
 })
 
+// ===== 团队管理 =====
+// 获取当前团队信息
+app.get('/api/team/info', (req, res) => {
+  const userId = parseInt(req.query.user_id) || 1
+  const user = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(userId)
+  if (!user) return res.json({ team: null })
+  const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(user.team_id || 1)
+  const members = db.prepare('SELECT id, username, name, role, phone, created_at FROM users WHERE team_id = ?').all(user.team_id || 1)
+  res.json({ team, members, isAdmin: user.role === 'admin' })
+})
+
+// 创建团队（新企业注册时）
+app.post('/api/team/create', (req, res) => {
+  const { name, owner_id } = req.body
+  if (!name || !owner_id) return res.status(400).json({ message: '缺少参数' })
+  const inviteCode = 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase()
+  const result = db.prepare('INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, ?)').run(name, inviteCode, owner_id)
+  db.prepare('UPDATE users SET team_id = ?, role = ? WHERE id = ?').run(result.lastInsertRowid, 'admin', owner_id)
+  res.json({ team_id: result.lastInsertRowid, invite_code: inviteCode })
+})
+
+// 通过邀请码加入团队
+app.post('/api/team/join', (req, res) => {
+  const { user_id, invite_code } = req.body
+  if (!user_id || !invite_code) return res.status(400).json({ message: '缺少参数' })
+  const team = db.prepare('SELECT * FROM teams WHERE invite_code = ?').get(invite_code.toUpperCase())
+  if (!team) return res.status(400).json({ message: '邀请码无效' })
+  db.prepare('UPDATE users SET team_id = ?, role = ? WHERE id = ?').run(team.id, 'user', user_id)
+  res.json({ team_id: team.id, team_name: team.name, message: '已加入 ' + team.name })
+})
+
 // ===== 飞书 OAuth 登录 =====
 const FEISHU_APP_ID = process.env.FEISHU_APP_ID
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET
@@ -429,8 +460,14 @@ app.get('/api/auth/feishu/callback', async (req, res) => {
     let user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
     if (!user) {
       const username = 'fs_' + openId.substring(0, 12)
-      db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role, team_id) VALUES (?, '', ?, ?, ?, ?, 1)").run(username, openId, name, avatar, isAdmin ? 'admin' : 'user')
+      // 新用户创建自己的团队
+      const teamResult = db.prepare("INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, ?)").run(name + '的团队', 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase(), 0)
+      const teamId = teamResult.lastInsertRowid
+      db.prepare("INSERT INTO users (username, password, open_id, name, avatar, role, team_id) VALUES (?, '', ?, ?, ?, ?, ?)").run(username, openId, name, avatar, 'admin', teamId)
+      // 更新团队owner
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
+      db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(user.id, teamId)
+    } else {
     } else {
       db.prepare('UPDATE users SET name = ?, avatar = ?, role = ? WHERE open_id = ?').run(name, avatar, isAdmin ? 'admin' : 'user', openId)
       user = db.prepare('SELECT * FROM users WHERE open_id = ?').get(openId)
@@ -503,7 +540,7 @@ app.post('/api/auth/send-code', strictLimiter, async (req, res) => {
 
 // 验证码登录
 app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
-  const { phone, code } = req.body
+  const { phone, code, invite_code } = req.body
   if (!phone || !code) return res.status(400).json({ message: '请输入手机号和验证码' })
 
   const valid = db.prepare("SELECT id FROM sms_codes WHERE phone = ? AND code = ? AND used = 0 AND expires_at > datetime('now')").get(phone, code)
@@ -515,8 +552,20 @@ app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
   let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
   if (!user) {
     const username = 'u' + phone.substring(7)
-    db.prepare("INSERT INTO users (username, password, phone, role, team_id) VALUES (?, '', ?, 'user', 1)").run(username, phone)
+    // 有邀请码→加入团队，无邀请码→创建新团队
+    let teamId = 0
+    if (invite_code) {
+      const team = db.prepare('SELECT id FROM teams WHERE invite_code = ?').get(invite_code.toUpperCase())
+      if (team) { teamId = team.id }
+    }
+    if (!teamId) {
+      const result = db.prepare("INSERT INTO teams (name, invite_code, owner_id) VALUES (?, ?, 0)").run('手机用户' + phone.substring(7), 'AI' + Math.random().toString(36).substring(2, 8).toUpperCase())
+      teamId = result.lastInsertRowid
+    }
+    const role = invite_code ? 'user' : 'admin'
+    db.prepare("INSERT INTO users (username, password, phone, role, team_id) VALUES (?, '', ?, ?, ?)").run(username, phone, role, teamId)
     user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone)
+    if (!invite_code) db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(user.id, teamId)
   }
 
   const token = crypto.randomBytes(32).toString('hex')
