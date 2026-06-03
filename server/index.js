@@ -82,23 +82,14 @@ const strictLimiter = rateLimit({
   message: { message: '操作过于频繁，请1分钟后再试' }
 })
 
-// 团队数据共享中间件：同一团队的用户共享数据
-app.use('/api', (req, res, next) => {
-  try {
-    const userId = req.query.user_id || req.body.user_id
-    if (userId && userId != 1) {
-      const user = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(userId)
-      if (user && user.team_id && user.role !== 'admin') {
-        const admin = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'admin' LIMIT 1").get(user.team_id)
-        if (admin && admin.id != userId) {
-          if (req.query.user_id) req.query.user_id = String(admin.id)
-          if (req.body.user_id) req.body.user_id = String(admin.id)
-        }
-      }
-    }
-  } catch (e) { /* 中间件错误不影响业务 */ }
-  next()
-})
+// 团队共享：获取有效 user_id（非管理员自动映射到团队管理员）
+function getEffectiveUserId(rawId) {
+  if (!rawId || rawId == 1) return String(rawId || 1)
+  const u = db.prepare('SELECT team_id, role FROM users WHERE id = ?').get(rawId)
+  if (!u || !u.team_id || u.role === 'admin') return String(rawId)
+  const admin = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'admin' LIMIT 1").get(u.team_id)
+  return admin ? String(admin.id) : String(rawId)
+}
 
 app.use('/api', generalLimiter)
 
@@ -361,7 +352,8 @@ app.get('/api/health', (req, res) => {
 // ===== 用户设置 =====
 // 修改密码
 app.put('/api/user/password', (req, res) => {
-  const { user_id, oldPassword, newPassword } = req.body
+  const { user_id: rawId, oldPassword, newPassword } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !oldPassword || !newPassword) return res.status(400).json({ message: '参数不完整' })
   if (newPassword.length < 6) return res.status(400).json({ message: '新密码至少6位' })
   const user = db.prepare('SELECT password FROM users WHERE id = ?').get(user_id)
@@ -372,7 +364,8 @@ app.put('/api/user/password', (req, res) => {
 
 // 修改个人信息
 app.put('/api/user/profile', (req, res) => {
-  const { user_id, username, name } = req.body
+  const { user_id: rawId, username, name } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !username) return res.status(400).json({ message: '用户名不能为空' })
   const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, user_id)
   if (existing) return res.status(400).json({ message: '用户名已被占用' })
@@ -442,7 +435,8 @@ app.post('/api/team/create', (req, res) => {
 
 // 通过邀请码加入团队
 app.post('/api/team/join', (req, res) => {
-  const { user_id, invite_code } = req.body
+  const { user_id: rawId, invite_code } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !invite_code) return res.status(400).json({ message: '缺少参数' })
   const team = db.prepare('SELECT * FROM teams WHERE invite_code = ?').get(invite_code.toUpperCase())
   if (!team) return res.status(400).json({ message: '邀请码无效' })
@@ -452,7 +446,8 @@ app.post('/api/team/join', (req, res) => {
 
 // 修改团队名称
 app.put('/api/team/:id', (req, res) => {
-  const { user_id, name } = req.body
+  const { user_id: rawId, name } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!name) return res.status(400).json({ message: '名称不能为空' })
   const user = db.prepare('SELECT role, team_id FROM users WHERE id = ?').get(user_id)
   if (!user || user.role !== 'admin') return res.status(403).json({ message: '仅管理员可修改' })
@@ -649,7 +644,8 @@ app.post('/api/auth/phone-login', strictLimiter, (req, res) => {
 
 // 绑定手机号（飞书登录后）
 app.post('/api/auth/bind-phone', (req, res) => {
-  const { user_id, phone, code } = req.body
+  const { user_id: rawId, phone, code } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !phone || !code) return res.status(400).json({ message: '参数不完整' })
 
   const valid = db.prepare("SELECT id FROM sms_codes WHERE phone = ? AND code = ? AND used = 0 AND expires_at > datetime('now')").get(phone, code)
@@ -687,7 +683,7 @@ app.post('/api/auth/login', strictLimiter, (req, res) => {
 
 // 获取当前用户的证照列表（支持按分类筛选和关键词搜索）
 app.get('/api/certificates', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const category = req.query.category || ''
   const keyword = req.query.keyword || ''
 
@@ -724,7 +720,7 @@ app.get('/api/certificates', (req, res) => {
 
 // 导出证照为 Excel 文件（支持 ?ids=1,2,3 批量导出）
 app.get('/api/certificates/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) {
     return res.status(400).json({ message: '缺少用户标识' })
@@ -772,7 +768,8 @@ app.get('/api/certificates/export', (req, res) => {
 
 // 新增证照（支持多文件上传：最多5个，单个≤10MB）
 app.post('/api/certificates', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, category, company_name, product_name, name, expiry_date, is_permanent } = req.body
+  const { category, company_name, product_name, name, expiry_date, is_permanent } = req.body
+  const user_id = getEffectiveUserId(req.body.user_id)
   if (!user_id || !name || !company_name) {
     return res.status(400).json({ message: '请填写证照名称和公司名称' })
   }
@@ -800,7 +797,8 @@ app.post('/api/certificates', upload.array('files', 5), sanitizeUploadBody, (req
 // 编辑证照
 app.put('/api/certificates/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, category, company_name, product_name, name, expiry_date, is_permanent } = req.body
+  const { user_id: rawId, category, company_name, product_name, name, expiry_date, is_permanent } = req.body
+  const user_id = getEffectiveUserId(rawId)
 
   const existing = db.prepare('SELECT * FROM certificates WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) {
@@ -860,7 +858,8 @@ app.delete('/api/certificates/:id', (req, res) => {
 
 // 批量删除证照
 app.post('/api/certificates/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
 
   if (!user_id || !Array.isArray(ids) || ids.length === 0) {
@@ -913,7 +912,8 @@ app.get('/api/product-reports', (req, res) => {
 })
 
 app.post('/api/product-reports', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, product_name, product_batch, report_number, report_type, agency_name, test_date, expiry_date, conclusion, unqualified_items } = req.body
+  const { user_id: rawId, product_name, product_batch, report_number, report_type, agency_name, test_date, expiry_date, conclusion, unqualified_items } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!product_name) return res.status(400).json({ message: '请填写产品名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare(
@@ -924,7 +924,8 @@ app.post('/api/product-reports', upload.array('files', 5), sanitizeUploadBody, (
 
 app.put('/api/product-reports/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, product_name, product_batch, report_number, report_type, agency_name, test_date, expiry_date, conclusion, unqualified_items } = req.body
+  const { user_id: rawId, product_name, product_batch, report_number, report_type, agency_name, test_date, expiry_date, conclusion, unqualified_items } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM product_reports WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '记录不存在' })
   let paths = JSON.parse(existing.file_paths || '[]')
@@ -948,7 +949,8 @@ app.delete('/api/product-reports/:id', (req, res) => {
 })
 
 app.post('/api/product-reports/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的报告' })
   const placeholders = ids.map(() => '?').join(',')
   const rows = db.prepare(`SELECT * FROM product_reports WHERE id IN (${placeholders}) AND user_id = ?`).all(...ids, user_id)
@@ -991,7 +993,8 @@ app.get('/api/sys-docs', (req, res) => {
 })
 
 app.post('/api/sys-docs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, doc_type, doc_number, doc_name, version, author, reviewer, approver, effective_date, review_date, status, category, associated_doc, applicable_dept, retention_period, content, url } = req.body
+  const { user_id: rawId, doc_type, doc_number, doc_name, version, author, reviewer, approver, effective_date, review_date, status, category, associated_doc, applicable_dept, retention_period, content, url } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!doc_name) return res.status(400).json({ message: '请填写文件名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare(
@@ -1002,7 +1005,8 @@ app.post('/api/sys-docs', upload.array('files', 5), sanitizeUploadBody, (req, re
 
 app.put('/api/sys-docs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, doc_type, doc_number, doc_name, version, author, reviewer, approver, effective_date, review_date, status, category, associated_doc, applicable_dept, retention_period, content, url } = req.body
+  const { user_id: rawId, doc_type, doc_number, doc_name, version, author, reviewer, approver, effective_date, review_date, status, category, associated_doc, applicable_dept, retention_period, content, url } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM sys_docs WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '文件不存在' })
   let paths = JSON.parse(existing.file_paths || '[]')
@@ -1031,7 +1035,8 @@ app.delete('/api/sys-docs/:id', (req, res) => {
 })
 
 app.post('/api/sys-docs/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的文件' })
   const placeholders = ids.map(() => '?').join(',')
   const rows = db.prepare(`SELECT * FROM sys_docs WHERE id IN (${placeholders}) AND user_id = ?`).all(...ids, user_id)
@@ -1081,7 +1086,8 @@ app.get('/api/training/plans', (req, res) => {
   res.json({ list: db.prepare(sql).all(...params) })
 })
 app.post('/api/training/plans', (req, res) => {
-  const { user_id, plan_number, plan_name, training_type, planned_date, trainer, duration, planned_attendees, remark } = req.body
+  const { user_id: rawId, plan_number, plan_name, training_type, planned_date, trainer, duration, planned_attendees, remark } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!plan_name) return res.status(400).json({ message: '请填写计划名称' })
   db.prepare('INSERT INTO training_plans (user_id, plan_number, plan_name, training_type, planned_date, trainer, duration, planned_attendees, remark) VALUES (?,?,?,?,?,?,?,?,?)').run(user_id, plan_number||'', plan_name, training_type||'在岗复训', planned_date||'', trainer||'', duration||'', planned_attendees||0, remark||'')
   res.json({ message: '添加成功' })
@@ -1108,7 +1114,8 @@ app.get('/api/training/courses', (req, res) => {
   res.json({ list: db.prepare(sql).all(...params) })
 })
 app.post('/api/training/courses', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, course_number, course_name, category, duration, exam_method, pass_score, material } = req.body
+  const { user_id: rawId, course_number, course_name, category, duration, exam_method, pass_score, material } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!course_name) return res.status(400).json({ message: '请填写课程名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare('INSERT INTO training_courses (user_id, course_number, course_name, category, duration, exam_method, pass_score, material, file_paths) VALUES (?,?,?,?,?,?,?,?,?)').run(user_id, course_number||'', course_name, category||'基础知识', duration||'', exam_method||'笔试', pass_score||80, material||'', JSON.stringify(paths))
@@ -1140,7 +1147,8 @@ app.get('/api/training/records', (req, res) => {
   res.json({ list: db.prepare(sql).all(...params) })
 })
 app.post('/api/training/records', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, record_number, plan_id, course_id, employee_name, department, training_type, training_date, trainer, duration, attendance, exam_score, exam_result } = req.body
+  const { user_id: rawId, record_number, plan_id, course_id, employee_name, department, training_type, training_date, trainer, duration, attendance, exam_score, exam_result } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!employee_name) return res.status(400).json({ message: '请填写员工姓名' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare('INSERT INTO training_records (user_id, record_number, plan_id, course_id, employee_name, department, training_type, training_date, trainer, duration, attendance, exam_score, exam_result, file_paths) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(user_id, record_number||'', plan_id||null, course_id||null, employee_name, department||'', training_type||'在岗复训', training_date||'', trainer||'', duration||'', attendance||'已签到', exam_score||null, exam_result||'', JSON.stringify(paths))
@@ -1172,7 +1180,8 @@ app.get('/api/training/exams', (req, res) => {
   res.json({ list: db.prepare(sql).all(...params) })
 })
 app.post('/api/training/exams', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, exam_number, record_id, employee_name, course_name, exam_method, total_score, score, pass_score, result, remark } = req.body
+  const { user_id: rawId, exam_number, record_id, employee_name, course_name, exam_method, total_score, score, pass_score, result, remark } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!employee_name) return res.status(400).json({ message: '请填写员工姓名' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare('INSERT INTO training_exams (user_id, exam_number, record_id, employee_name, course_name, exam_method, total_score, score, pass_score, result, remark, file_paths) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(user_id, exam_number||'', record_id||null, employee_name, course_name||'', exam_method||'笔试', total_score||100, score||0, pass_score||80, result||'合格', remark||'', JSON.stringify(paths))
@@ -1204,7 +1213,8 @@ app.get('/api/training/certs', (req, res) => {
   res.json({ list })
 })
 app.post('/api/training/certs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, cert_number, employee_name, cert_type, issuing_agency, issue_date, expiry_date } = req.body
+  const { user_id: rawId, cert_number, employee_name, cert_type, issuing_agency, issue_date, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!employee_name) return res.status(400).json({ message: '请填写员工姓名' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   db.prepare('INSERT INTO training_certs (user_id, cert_number, employee_name, cert_type, issuing_agency, issue_date, expiry_date, file_paths) VALUES (?,?,?,?,?,?,?,?)').run(user_id, cert_number||'', employee_name, cert_type||'食品安全管理员', issuing_agency||'', issue_date||'', expiry_date||'', JSON.stringify(paths))
@@ -1229,7 +1239,7 @@ app.delete('/api/training/certs/:id', (req, res) => {
 
 // 一次性返回统计数据和预警列表，减少前端请求
 app.get('/api/dashboard/stats', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) {
     return res.status(400).json({ message: '缺少用户标识' })
   }
@@ -1365,7 +1375,7 @@ app.get('/api/dashboard/stats', (req, res) => {
 // 健康指数评分
 app.get('/api/dashboard/health-score', (req, res) => {
   try {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   console.log('[health-score] 开始计算, userId:', userId)
 
@@ -1473,7 +1483,7 @@ app.get('/api/dashboard/health-score', (req, res) => {
 // AI 智能报告（日/周/月）
 app.get('/api/dashboard/report', (req, res) => {
   try {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const period = req.query.period || 'day'
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -1589,7 +1599,7 @@ app.get('/api/dashboard/report', (req, res) => {
 
 // 获取健康证列表（支持按姓名/部门搜索）
 app.get('/api/health-certs', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
 
   if (!userId) {
@@ -1620,7 +1630,8 @@ app.get('/api/health-certs', (req, res) => {
 
 // 新增健康证（支持多文件上传）
 app.post('/api/health-certs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, employee_name, department, expiry_date } = req.body
+  const { user_id: rawId, employee_name, department, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !employee_name || !expiry_date) {
     return res.status(400).json({ message: '请填写员工姓名和到期日期' })
   }
@@ -1640,7 +1651,8 @@ app.post('/api/health-certs', upload.array('files', 5), sanitizeUploadBody, (req
 // 编辑健康证
 app.put('/api/health-certs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, employee_name, department, expiry_date } = req.body
+  const { user_id: rawId, employee_name, department, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
 
   // 校验权限
   const existing = db.prepare('SELECT * FROM health_certs WHERE id = ? AND user_id = ?').get(id, user_id)
@@ -1684,7 +1696,8 @@ app.delete('/api/health-certs/:id', (req, res) => {
 
 // 批量删除健康证
 app.post('/api/health-certs/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
 
   if (!user_id || !Array.isArray(ids) || ids.length === 0) {
@@ -1713,7 +1726,7 @@ app.post('/api/health-certs/batch-delete', (req, res) => {
 
 // 导出健康证为 Excel
 app.get('/api/health-certs/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) {
     return res.status(400).json({ message: '缺少用户标识' })
@@ -1754,7 +1767,7 @@ app.get('/api/health-certs/export', (req, res) => {
 
 // 获取通知列表（最近50条）和未读数
 app.get('/api/notifications', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) {
     return res.status(400).json({ message: '缺少用户标识' })
   }
@@ -1846,7 +1859,8 @@ app.get('/api/rules', (req, res) => {
 
 // 上传标签（文件存入 uploads/labels/）
 app.post('/api/labels', labelsUpload.single('file'), sanitizeUploadBody, (req, res) => {
-  const { user_id, product_name, category } = req.body
+  const { user_id: rawId, product_name, category } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !product_name || !category) {
     return res.status(400).json({ message: '请填写产品名称和分类' })
   }
@@ -1869,7 +1883,7 @@ app.post('/api/labels', labelsUpload.single('file'), sanitizeUploadBody, (req, r
 
 // 获取标签列表
 app.get('/api/labels', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) {
     return res.status(400).json({ message: '缺少用户标识' })
   }
@@ -1971,7 +1985,7 @@ app.post('/api/labels/:id/audit', strictLimiter, async (req, res) => {
 // 获取同产品历史版本
 app.get('/api/labels/:id/history', (req, res) => {
   const { id } = req.params
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
 
   const current = db.prepare('SELECT * FROM labels WHERE id = ? AND user_id = ?').get(id, userId)
   if (!current) {
@@ -1989,7 +2003,7 @@ app.get('/api/labels/:id/history', (req, res) => {
 // 下载审核报告 PDF
 app.get('/api/labels/:id/report', async (req, res) => {
   const { id } = req.params
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
 
   // 获取标签信息
   const label = db.prepare('SELECT * FROM labels WHERE id = ? AND user_id = ?').get(id, userId)
@@ -2102,7 +2116,8 @@ app.post('/api/ai-audit/ingredients', strictLimiter, async (req, res) => {
 // ===== AI 供应商合规审核（按PDF六步逻辑） =====
 app.post('/api/ai/supplier-score', strictLimiter, async (req, res) => {
   try {
-  const { user_id, company_name, sc_number, credit_code, address } = req.body
+  const { user_id: rawId, company_name, sc_number, credit_code, address } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !company_name) return res.status(400).json({ message: '请提供公司名称' })
 
   // Step 1: 从数据库提取供应商信息
@@ -2465,8 +2480,10 @@ app.post('/api/ai-tool/haccp', strictLimiter, async (req, res) => {
 
 // 获取客诉列表
 app.get('/api/complaints', (req, res) => {
-  const { user_id, keyword, status, type, urgency, start_date, end_date } = req.query
+  let { user_id, keyword, status, type, urgency, start_date, end_date } = req.query
   if (!user_id) return res.status(400).json({ message: '缺少用户标识' })
+
+  user_id = getEffectiveUserId(user_id)
 
   let sql = 'SELECT * FROM complaint_records WHERE user_id = ?'
   const params = [user_id]
@@ -2520,8 +2537,9 @@ app.get('/api/complaints/:id', (req, res) => {
 
 // 新增客诉
 app.post('/api/complaints', (req, res) => {
-  const { user_id, customer_name, customer_phone, complaint_date, complaint_channel, complaint_type,
+  const { customer_name, customer_phone, complaint_date, complaint_channel, complaint_type,
     product_name, batch_no, problem_desc, urgency, handler, file_paths } = req.body
+  const user_id = getEffectiveUserId(req.body.user_id)
   if (!user_id || !customer_name || !problem_desc) return res.status(400).json({ message: '请填写投诉人、问题描述等必填信息' })
 
   const complaint_number = generateComplaintNumber()
@@ -2582,7 +2600,7 @@ app.delete('/api/complaints/:id', (req, res) => {
 // ===== 虫害管理 - 供应商资质文档 =====
 
 app.get('/api/pest/supplier-docs', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const docType = req.query.doc_type || ''
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
@@ -2602,7 +2620,7 @@ app.get('/api/pest/supplier-docs', (req, res) => {
 })
 
 app.get('/api/pest/supplier-docs/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -2635,7 +2653,8 @@ app.get('/api/pest/supplier-docs/export', (req, res) => {
 })
 
 app.post('/api/pest/supplier-docs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, doc_type, company_name, doc_name, doc_number, issue_date, expiry_date, coverage, service_scope, amount } = req.body
+  const { user_id: rawId, doc_type, company_name, doc_name, doc_number, issue_date, expiry_date, coverage, service_scope, amount } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !doc_name || !company_name) return res.status(400).json({ message: '请填写公司名称和文档名称' })
 
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
@@ -2647,7 +2666,8 @@ app.post('/api/pest/supplier-docs', upload.array('files', 5), sanitizeUploadBody
 
 app.put('/api/pest/supplier-docs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, doc_type, company_name, doc_name, doc_number, issue_date, expiry_date, coverage, service_scope, amount } = req.body
+  const { user_id: rawId, doc_type, company_name, doc_name, doc_number, issue_date, expiry_date, coverage, service_scope, amount } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_supplier_docs WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '文档不存在或无权编辑' })
 
@@ -2684,7 +2704,8 @@ app.delete('/api/pest/supplier-docs/:id', (req, res) => {
 })
 
 app.post('/api/pest/supplier-docs/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的文档' })
   const placeholders = ids.map(() => '?').join(',')
@@ -2704,7 +2725,7 @@ app.post('/api/pest/supplier-docs/batch-delete', (req, res) => {
 // ===== 虫害管理 - 人员 =====
 
 app.get('/api/pest/staff', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -2721,7 +2742,8 @@ app.get('/api/pest/staff', (req, res) => {
 })
 
 app.post('/api/pest/staff', (req, res) => {
-  const { user_id, name, employee_number, phone } = req.body
+  const { user_id: rawId, name, employee_number, phone } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !name) return res.status(400).json({ message: '请填写人员姓名' })
   const result = db.prepare('INSERT INTO pest_staff (user_id, name, employee_number, phone) VALUES (?,?,?,?)').run(user_id, name, employee_number || '', phone || '')
   res.json({ message: '添加成功', id: result.lastInsertRowid })
@@ -2729,7 +2751,8 @@ app.post('/api/pest/staff', (req, res) => {
 
 app.put('/api/pest/staff/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, name, employee_number, phone } = req.body
+  const { user_id: rawId, name, employee_number, phone } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_staff WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '人员不存在或无权编辑' })
   db.prepare('UPDATE pest_staff SET name=?, employee_number=?, phone=? WHERE id=?').run(name || existing.name, employee_number || existing.employee_number, phone || existing.phone, id)
@@ -2758,7 +2781,8 @@ app.delete('/api/pest/staff/:id', (req, res) => {
 })
 
 app.post('/api/pest/staff/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的人员' })
   const placeholders = ids.map(() => '?').join(',')
@@ -2781,7 +2805,7 @@ app.post('/api/pest/staff/batch-delete', (req, res) => {
 // ===== 虫害管理 - 人员证件 =====
 
 app.get('/api/pest/staff-certs', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const staffId = req.query.staff_id || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -2795,7 +2819,7 @@ app.get('/api/pest/staff-certs', (req, res) => {
 })
 
 app.get('/api/pest/staff-certs/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -2829,7 +2853,8 @@ app.get('/api/pest/staff-certs/export', (req, res) => {
 })
 
 app.post('/api/pest/staff-certs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, staff_id, cert_type, cert_name, issuing_agency, cert_number, issue_date, expiry_date } = req.body
+  const { user_id: rawId, staff_id, cert_type, cert_name, issuing_agency, cert_number, issue_date, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !staff_id || !cert_name) return res.status(400).json({ message: '请填写证件名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -2840,7 +2865,8 @@ app.post('/api/pest/staff-certs', upload.array('files', 5), sanitizeUploadBody, 
 
 app.put('/api/pest/staff-certs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, cert_type, cert_name, issuing_agency, cert_number, issue_date, expiry_date } = req.body
+  const { user_id: rawId, cert_type, cert_name, issuing_agency, cert_number, issue_date, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_staff_certs WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '证件不存在或无权编辑' })
 
@@ -2877,7 +2903,8 @@ app.delete('/api/pest/staff-certs/:id', (req, res) => {
 })
 
 app.post('/api/pest/staff-certs/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的证件' })
   const placeholders = ids.map(() => '?').join(',')
@@ -2897,7 +2924,7 @@ app.post('/api/pest/staff-certs/batch-delete', (req, res) => {
 // ===== 虫害管理 - 化学品 =====
 
 app.get('/api/pest/chemicals', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -2914,7 +2941,8 @@ app.get('/api/pest/chemicals', (req, res) => {
 })
 
 app.post('/api/pest/chemicals', (req, res) => {
-  const { user_id, name, cas_number, formulation, usage_area, storage_location, quantity, supplier } = req.body
+  const { user_id: rawId, name, cas_number, formulation, usage_area, storage_location, quantity, supplier } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !name) return res.status(400).json({ message: '请填写化学品名称' })
   const result = db.prepare(
     'INSERT INTO pest_chemicals (user_id, name, cas_number, formulation, usage_area, storage_location, quantity, supplier) VALUES (?,?,?,?,?,?,?,?)'
@@ -2924,7 +2952,8 @@ app.post('/api/pest/chemicals', (req, res) => {
 
 app.put('/api/pest/chemicals/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, name, cas_number, formulation, usage_area, storage_location, quantity, supplier } = req.body
+  const { user_id: rawId, name, cas_number, formulation, usage_area, storage_location, quantity, supplier } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_chemicals WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '化学品不存在或无权编辑' })
   db.prepare(
@@ -2955,7 +2984,8 @@ app.delete('/api/pest/chemicals/:id', (req, res) => {
 })
 
 app.post('/api/pest/chemicals/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的化学品' })
   const placeholders = ids.map(() => '?').join(',')
@@ -2978,7 +3008,7 @@ app.post('/api/pest/chemicals/batch-delete', (req, res) => {
 // ===== 虫害管理 - 化学品文档 =====
 
 app.get('/api/pest/chemical-docs', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const docType = req.query.doc_type || ''
   const chemicalId = req.query.chemical_id || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
@@ -2994,7 +3024,8 @@ app.get('/api/pest/chemical-docs', (req, res) => {
 })
 
 app.post('/api/pest/chemical-docs', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, chemical_id, doc_type, doc_name, doc_number, version, issue_date, expiry_date, ghs_classification, holder, active_ingredient, usage_scope, is_compliant } = req.body
+  const { user_id: rawId, chemical_id, doc_type, doc_name, doc_number, version, issue_date, expiry_date, ghs_classification, holder, active_ingredient, usage_scope, is_compliant } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !chemical_id || !doc_name) return res.status(400).json({ message: '请填写文档名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3005,7 +3036,8 @@ app.post('/api/pest/chemical-docs', upload.array('files', 5), sanitizeUploadBody
 
 app.put('/api/pest/chemical-docs/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, doc_type, doc_name, doc_number, version, issue_date, expiry_date, ghs_classification, holder, active_ingredient, usage_scope, is_compliant } = req.body
+  const { user_id: rawId, doc_type, doc_name, doc_number, version, issue_date, expiry_date, ghs_classification, holder, active_ingredient, usage_scope, is_compliant } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_chemical_docs WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '文档不存在或无权编辑' })
 
@@ -3042,7 +3074,8 @@ app.delete('/api/pest/chemical-docs/:id', (req, res) => {
 })
 
 app.post('/api/pest/chemical-docs/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的文档' })
   const placeholders = ids.map(() => '?').join(',')
@@ -3062,14 +3095,15 @@ app.post('/api/pest/chemical-docs/batch-delete', (req, res) => {
 // ===== 虫害管理 - 布防图 =====
 
 app.get('/api/pest/layout-maps', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   const list = db.prepare('SELECT * FROM pest_layout_maps WHERE user_id = ? ORDER BY created_at DESC').all(userId)
   res.json({ list })
 })
 
 app.post('/api/pest/layout-maps', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, map_name, version, coverage_area } = req.body
+  const { user_id: rawId, map_name, version, coverage_area } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !map_name) return res.status(400).json({ message: '请填写布防图名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3080,7 +3114,8 @@ app.post('/api/pest/layout-maps', upload.array('files', 5), sanitizeUploadBody, 
 
 app.put('/api/pest/layout-maps/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, map_name, version, coverage_area } = req.body
+  const { user_id: rawId, map_name, version, coverage_area } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_layout_maps WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '布防图不存在或无权编辑' })
 
@@ -3118,7 +3153,7 @@ app.delete('/api/pest/layout-maps/:id', (req, res) => {
 // ===== 虫害管理 - 检查记录 =====
 
 app.get('/api/pest/inspections', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -3135,7 +3170,7 @@ app.get('/api/pest/inspections', (req, res) => {
 })
 
 app.get('/api/pest/inspections/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -3170,7 +3205,8 @@ app.get('/api/pest/inspections/export', (req, res) => {
 })
 
 app.post('/api/pest/inspections', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, inspection_date, inspector, area, findings_type, findings_count, findings_location, measures, next_inspection_date } = req.body
+  const { user_id: rawId, inspection_date, inspector, area, findings_type, findings_count, findings_location, measures, next_inspection_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !inspection_date) return res.status(400).json({ message: '请填写检查日期' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3181,7 +3217,8 @@ app.post('/api/pest/inspections', upload.array('files', 5), sanitizeUploadBody, 
 
 app.put('/api/pest/inspections/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, inspection_date, inspector, area, findings_type, findings_count, findings_location, measures, next_inspection_date } = req.body
+  const { user_id: rawId, inspection_date, inspector, area, findings_type, findings_count, findings_location, measures, next_inspection_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_inspections WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '检查记录不存在或无权编辑' })
 
@@ -3218,7 +3255,8 @@ app.delete('/api/pest/inspections/:id', (req, res) => {
 })
 
 app.post('/api/pest/inspections/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的记录' })
   const placeholders = ids.map(() => '?').join(',')
@@ -3238,14 +3276,15 @@ app.post('/api/pest/inspections/batch-delete', (req, res) => {
 // ===== 虫害管理 - 月度报告 =====
 
 app.get('/api/pest/monthly-reports', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   const list = db.prepare('SELECT * FROM pest_monthly_reports WHERE user_id = ? ORDER BY report_month DESC').all(userId)
   res.json({ list })
 })
 
 app.post('/api/pest/monthly-reports', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, report_month, author, summary, improvements } = req.body
+  const { user_id: rawId, report_month, author, summary, improvements } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !report_month) return res.status(400).json({ message: '请填写报告月份' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3256,7 +3295,8 @@ app.post('/api/pest/monthly-reports', upload.array('files', 5), sanitizeUploadBo
 
 app.put('/api/pest/monthly-reports/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, report_month, author, summary, improvements } = req.body
+  const { user_id: rawId, report_month, author, summary, improvements } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_monthly_reports WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '报告不存在或无权编辑' })
 
@@ -3294,7 +3334,7 @@ app.delete('/api/pest/monthly-reports/:id', (req, res) => {
 // ===== 虫害管理 - 服务报告 =====
 
 app.get('/api/pest/service-reports', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -3311,7 +3351,7 @@ app.get('/api/pest/service-reports', (req, res) => {
 })
 
 app.get('/api/pest/service-reports/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -3348,7 +3388,8 @@ app.get('/api/pest/service-reports/export', (req, res) => {
 })
 
 app.post('/api/pest/service-reports', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, report_number, service_date, supplier, service_staff, service_area, service_content, findings, measures, chemicals_used, customer_signee, sign_date } = req.body
+  const { user_id: rawId, report_number, service_date, supplier, service_staff, service_area, service_content, findings, measures, chemicals_used, customer_signee, sign_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !report_number) return res.status(400).json({ message: '请填写报告编号' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3359,7 +3400,8 @@ app.post('/api/pest/service-reports', upload.array('files', 5), sanitizeUploadBo
 
 app.put('/api/pest/service-reports/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, report_number, service_date, supplier, service_staff, service_area, service_content, findings, measures, chemicals_used, customer_signee, sign_date } = req.body
+  const { user_id: rawId, report_number, service_date, supplier, service_staff, service_area, service_content, findings, measures, chemicals_used, customer_signee, sign_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_service_reports WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '报告不存在或无权编辑' })
 
@@ -3396,7 +3438,8 @@ app.delete('/api/pest/service-reports/:id', (req, res) => {
 })
 
 app.post('/api/pest/service-reports/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的报告' })
   const placeholders = ids.map(() => '?').join(',')
@@ -3416,7 +3459,7 @@ app.post('/api/pest/service-reports/batch-delete', (req, res) => {
 // ===== 虫害管理 - 投诉整改 =====
 
 app.get('/api/pest/complaints', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const status = req.query.status || ''
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
@@ -3435,7 +3478,7 @@ app.get('/api/pest/complaints', (req, res) => {
 })
 
 app.get('/api/pest/complaints/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
@@ -3473,7 +3516,8 @@ app.get('/api/pest/complaints/export', (req, res) => {
 })
 
 app.post('/api/pest/complaints', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, complaint_number, complaint_date, reporter, area, description, severity, deadline } = req.body
+  const { user_id: rawId, complaint_number, complaint_date, reporter, area, description, severity, deadline } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !complaint_number) return res.status(400).json({ message: '请填写投诉编号' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   // 根据严重等级自动计算时限
@@ -3492,7 +3536,8 @@ app.post('/api/pest/complaints', upload.array('files', 5), sanitizeUploadBody, (
 
 app.put('/api/pest/complaints/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, complaint_number, complaint_date, reporter, area, description, severity, handler, deadline, measures, review_result, status, close_date } = req.body
+  const { user_id: rawId, complaint_number, complaint_date, reporter, area, description, severity, handler, deadline, measures, review_result, status, close_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_complaints WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '投诉不存在或无权编辑' })
 
@@ -3529,7 +3574,8 @@ app.delete('/api/pest/complaints/:id', (req, res) => {
 })
 
 app.post('/api/pest/complaints/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的投诉' })
   const placeholders = ids.map(() => '?').join(',')
@@ -3549,7 +3595,8 @@ app.post('/api/pest/complaints/batch-delete', (req, res) => {
 // 投诉状态流转快捷接口
 app.put('/api/pest/complaints/:id/assign', (req, res) => {
   const { id } = req.params
-  const { user_id, handler } = req.body
+  const { user_id: rawId, handler } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_complaints WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '投诉不存在' })
   db.prepare('UPDATE pest_complaints SET handler=?, status=\'处理中\', updated_at=CURRENT_TIMESTAMP WHERE id=?').run(handler || '', id)
@@ -3558,7 +3605,8 @@ app.put('/api/pest/complaints/:id/assign', (req, res) => {
 
 app.put('/api/pest/complaints/:id/review', (req, res) => {
   const { id } = req.params
-  const { user_id, review_result } = req.body
+  const { user_id: rawId, review_result } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM pest_complaints WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '投诉不存在' })
   const newStatus = review_result === '合格' ? '已关闭' : '待复查'
@@ -3581,7 +3629,7 @@ app.put('/api/pest/complaints/:id/close', (req, res) => {
 // ===== 计量校准 - 设备台账 =====
 
 app.get('/api/calibration/devices', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   const deviceType = req.query.device_type || ''
   const status = req.query.status || ''
@@ -3603,7 +3651,7 @@ app.get('/api/calibration/devices', (req, res) => {
 })
 
 app.get('/api/calibration/devices/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const ids = req.query.ids ? req.query.ids.split(',').map(Number).filter(n => n > 0) : []
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   let sql = 'SELECT * FROM calibration_devices WHERE user_id = ?'
@@ -3626,7 +3674,8 @@ app.get('/api/calibration/devices/export', (req, res) => {
 })
 
 app.post('/api/calibration/devices', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, device_number, device_name, device_type, brand_model, accuracy, measure_range, location, responsible_person, start_date, calibration_cycle, last_calibration_date, next_calibration_date } = req.body
+  const { user_id: rawId, device_number, device_name, device_type, brand_model, accuracy, measure_range, location, responsible_person, start_date, calibration_cycle, last_calibration_date, next_calibration_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !device_name) return res.status(400).json({ message: '请填写设备名称' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3637,7 +3686,8 @@ app.post('/api/calibration/devices', upload.array('files', 5), sanitizeUploadBod
 
 app.put('/api/calibration/devices/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, device_number, device_name, device_type, brand_model, accuracy, measure_range, location, responsible_person, start_date, calibration_cycle, last_calibration_date, next_calibration_date, calibration_status, device_status } = req.body
+  const { user_id: rawId, device_number, device_name, device_type, brand_model, accuracy, measure_range, location, responsible_person, start_date, calibration_cycle, last_calibration_date, next_calibration_date, calibration_status, device_status } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM calibration_devices WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '设备不存在或无权编辑' })
   const existingRaw = (req.body.existing_files || '[]').replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
@@ -3666,7 +3716,8 @@ app.delete('/api/calibration/devices/:id', (req, res) => {
 })
 
 app.post('/api/calibration/devices/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const fs = require('fs')
   if (!user_id || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择要删除的设备' })
   const placeholders = ids.map(() => '?').join(',')
@@ -3679,7 +3730,7 @@ app.post('/api/calibration/devices/batch-delete', (req, res) => {
 // ===== 计量校准 - 校准计划 =====
 
 app.get('/api/calibration/plans', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const status = req.query.status || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   let sql = 'SELECT cp.*, cd.device_name, cd.device_number FROM calibration_plans cp LEFT JOIN calibration_devices cd ON cp.device_id = cd.id WHERE cp.user_id = ?'
@@ -3691,7 +3742,8 @@ app.get('/api/calibration/plans', (req, res) => {
 })
 
 app.post('/api/calibration/plans', (req, res) => {
-  const { user_id, plan_number, device_id, planned_date, agency_id, method, remark } = req.body
+  const { user_id: rawId, plan_number, device_id, planned_date, agency_id, method, remark } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !device_id || !planned_date) return res.status(400).json({ message: '请填写必填项' })
   const result = db.prepare(
     'INSERT INTO calibration_plans (user_id, plan_number, device_id, planned_date, agency_id, method, remark) VALUES (?,?,?,?,?,?,?)'
@@ -3701,7 +3753,8 @@ app.post('/api/calibration/plans', (req, res) => {
 
 app.put('/api/calibration/plans/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, plan_number, device_id, planned_date, actual_date, agency_id, method, plan_status, result, remark } = req.body
+  const { user_id: rawId, plan_number, device_id, planned_date, actual_date, agency_id, method, plan_status, result, remark } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM calibration_plans WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '计划不存在或无权编辑' })
   db.prepare(
@@ -3722,7 +3775,7 @@ app.delete('/api/calibration/plans/:id', (req, res) => {
 // ===== 计量校准 - 校准记录 =====
 
 app.get('/api/calibration/records', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   let sql = 'SELECT cr.*, cd.device_name, cd.device_number FROM calibration_records cr LEFT JOIN calibration_devices cd ON cr.device_id = cd.id WHERE cr.user_id = ?'
@@ -3738,7 +3791,7 @@ app.get('/api/calibration/records', (req, res) => {
 })
 
 app.get('/api/calibration/records/export', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   const rows = db.prepare(
     'SELECT cr.*, cd.device_name, cd.device_number FROM calibration_records cr LEFT JOIN calibration_devices cd ON cr.device_id = cd.id WHERE cr.user_id = ? ORDER BY cr.calibration_date DESC'
@@ -3758,7 +3811,8 @@ app.get('/api/calibration/records/export', (req, res) => {
 })
 
 app.post('/api/calibration/records', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, cert_number, device_id, plan_id, calibration_date, agency_name, agency_qualification, standard, method, environment, test_data, max_error, conclusion, limit_note, next_calibration_date, calibrator } = req.body
+  const { user_id: rawId, cert_number, device_id, plan_id, calibration_date, agency_name, agency_qualification, standard, method, environment, test_data, max_error, conclusion, limit_note, next_calibration_date, calibrator } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !cert_number || !device_id) return res.status(400).json({ message: '请填写必填项' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   // 解析测试数据 JSON
@@ -3781,7 +3835,8 @@ app.post('/api/calibration/records', upload.array('files', 5), sanitizeUploadBod
 
 app.put('/api/calibration/records/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, cert_number, calibration_date, agency_name, agency_qualification, standard, method, environment, test_data, max_error, conclusion, limit_note, next_calibration_date, calibrator } = req.body
+  const { user_id: rawId, cert_number, calibration_date, agency_name, agency_qualification, standard, method, environment, test_data, max_error, conclusion, limit_note, next_calibration_date, calibrator } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM calibration_records WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '记录不存在或无权编辑' })
   const existingRaw = (req.body.existing_files || '[]').replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
@@ -3819,7 +3874,7 @@ app.delete('/api/calibration/records/:id', (req, res) => {
 // ===== 计量校准 - 校准机构 =====
 
 app.get('/api/calibration/agencies', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
   let sql = 'SELECT * FROM calibration_agencies WHERE user_id = ?'
@@ -3835,7 +3890,8 @@ app.get('/api/calibration/agencies', (req, res) => {
 })
 
 app.post('/api/calibration/agencies', (req, res) => {
-  const { user_id, agency_name, qualification, cert_number, cert_expiry, service_scope, contact_person, contact_phone, address } = req.body
+  const { user_id: rawId, agency_name, qualification, cert_number, cert_expiry, service_scope, contact_person, contact_phone, address } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !agency_name) return res.status(400).json({ message: '请填写机构名称' })
   const result = db.prepare(
     'INSERT INTO calibration_agencies (user_id, agency_name, qualification, cert_number, cert_expiry, service_scope, contact_person, contact_phone, address) VALUES (?,?,?,?,?,?,?,?,?)'
@@ -3845,7 +3901,8 @@ app.post('/api/calibration/agencies', (req, res) => {
 
 app.put('/api/calibration/agencies/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, agency_name, qualification, cert_number, cert_expiry, service_scope, contact_person, contact_phone, address, cooperation_status, rating } = req.body
+  const { user_id: rawId, agency_name, qualification, cert_number, cert_expiry, service_scope, contact_person, contact_phone, address, cooperation_status, rating } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM calibration_agencies WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '机构不存在或无权编辑' })
   db.prepare(
@@ -3866,7 +3923,7 @@ app.delete('/api/calibration/agencies/:id', (req, res) => {
 // ===== 计量校准 - 异常处理 =====
 
 app.get('/api/calibration/exceptions', (req, res) => {
-  const userId = req.query.user_id
+  const userId = getEffectiveUserId(req.query.user_id)
   const status = req.query.status || ''
   const keyword = req.query.keyword || ''
   if (!userId) return res.status(400).json({ message: '缺少用户标识' })
@@ -3884,7 +3941,8 @@ app.get('/api/calibration/exceptions', (req, res) => {
 })
 
 app.post('/api/calibration/exceptions', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
-  const { user_id, exception_number, device_id, exception_type, description, severity, discover_date, impact_assessment } = req.body
+  const { user_id: rawId, exception_number, device_id, exception_type, description, severity, discover_date, impact_assessment } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!user_id || !exception_number || !device_id) return res.status(400).json({ message: '请填写必填项' })
   const paths = (req.files || []).map(f => '/uploads/' + f.filename)
   const result = db.prepare(
@@ -3895,7 +3953,8 @@ app.post('/api/calibration/exceptions', upload.array('files', 5), sanitizeUpload
 
 app.put('/api/calibration/exceptions/:id', upload.array('files', 5), sanitizeUploadBody, (req, res) => {
   const { id } = req.params
-  const { user_id, exception_number, exception_type, description, severity, discover_date, impact_assessment, measures, handler, handle_date, recalibration_date, status } = req.body
+  const { user_id: rawId, exception_number, exception_type, description, severity, discover_date, impact_assessment, measures, handler, handle_date, recalibration_date, status } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM calibration_exceptions WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '异常不存在或无权编辑' })
   const existingRaw = (req.body.existing_files || '[]').replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
@@ -3986,7 +4045,8 @@ app.post('/api/raw-materials/batch', (req, res) => {
 })
 
 app.get('/api/raw-materials', (req, res) => {
-  const { user_id, keyword, category, risk_level, status } = req.query
+  const { keyword, category, risk_level, status } = req.query
+  const user_id = getEffectiveUserId(req.query.user_id)
   let sql = `SELECT rm.*, CASE WHEN rms.id IS NOT NULL THEN 1 ELSE 0 END AS hasStandard
     FROM raw_materials rm
     LEFT JOIN raw_material_standards rms ON rms.material_id = rm.id
@@ -4002,7 +4062,8 @@ app.get('/api/raw-materials', (req, res) => {
 })
 
 app.post('/api/raw-materials', (req, res) => {
-  const { user_id, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers } = req.body
+  const { user_id: rawId, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!material_name) return res.status(400).json({ message: '请填写原料名称' })
   // 自动生成原料编号
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM raw_materials WHERE user_id = ?').get(user_id).cnt
@@ -4015,7 +4076,8 @@ app.post('/api/raw-materials', (req, res) => {
 
 app.put('/api/raw-materials/:id', (req, res) => {
   const { id } = req.params
-  const { user_id, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers, status } = req.body
+  const { user_id: rawId, material_name, category, risk_level, specification, shelf_life, shelf_life_unit, storage_condition, executive_standard, allergen_info, suppliers, status } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const existing = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!existing) return res.status(404).json({ message: '原料不存在' })
   db.prepare(
@@ -4034,7 +4096,8 @@ app.delete('/api/raw-materials/:id', (req, res) => {
 
 // 批量删除原料
 app.post('/api/raw-materials/batch-delete', (req, res) => {
-  const { user_id, ids } = req.body
+  const { user_id: rawId, ids } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择原料' })
   const placeholders = ids.map(() => '?').join(',')
   db.prepare(`DELETE FROM raw_materials WHERE id IN (${placeholders}) AND user_id = ?`).run(...ids, user_id)
@@ -4043,7 +4106,8 @@ app.post('/api/raw-materials/batch-delete', (req, res) => {
 
 // 批量修改状态
 app.post('/api/raw-materials/batch-status', (req, res) => {
-  const { user_id, ids, status } = req.body
+  const { user_id: rawId, ids, status } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: '请选择原料' })
   const placeholders = ids.map(() => '?').join(',')
   db.prepare(`UPDATE raw_materials SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders}) AND user_id = ?`).run(status, ...ids, user_id)
@@ -4090,7 +4154,8 @@ app.get('/api/raw-materials/:id/standards', (req, res) => {
 
 app.post('/api/raw-materials/:id/standards', (req, res) => {
   const { id } = req.params
-  const { user_id, temp_standard, cert_requirements, sensory_items, packaging_requirement, shelf_life_ratio, judge_rules } = req.body
+  const { user_id: rawId, temp_standard, cert_requirements, sensory_items, packaging_requirement, shelf_life_ratio, judge_rules } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const material = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!material) return res.status(404).json({ message: '原料不存在' })
   // 检查是否已有标准配置
@@ -4144,7 +4209,8 @@ app.get('/api/raw-material/batches/:id', (req, res) => {
 })
 
 app.post('/api/raw-material/batches', (req, res) => {
-  const { user_id, arrival_time, material_name, material_id, supplier, po_number, planned_quantity, actual_quantity, inspector } = req.body
+  const { user_id: rawId, arrival_time, material_name, material_id, supplier, po_number, planned_quantity, actual_quantity, inspector } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!material_name) return res.status(400).json({ message: '请填写原料名称' })
   // 自动生成批次号
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -4158,7 +4224,8 @@ app.post('/api/raw-material/batches', (req, res) => {
 
 app.put('/api/raw-material/batches/:id/inspect', (req, res) => {
   const { id } = req.params
-  const { user_id, cert_check, sensory_check, temp_check, packaging_check, inspect_photos } = req.body
+  const { user_id: rawId, cert_check, sensory_check, temp_check, packaging_check, inspect_photos } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const batch = db.prepare('SELECT * FROM raw_material_batches WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!batch) return res.status(404).json({ message: '批次不存在' })
   // 插入或更新检查记录
@@ -4178,7 +4245,8 @@ app.put('/api/raw-material/batches/:id/inspect', (req, res) => {
 
 app.put('/api/raw-material/batches/:id/judge', (req, res) => {
   const { id } = req.params
-  const { user_id, judge_result, judge_approver } = req.body
+  const { user_id: rawId, judge_result, judge_approver } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!judge_result) return res.status(400).json({ message: '请选择判定结果' })
   const batch = db.prepare('SELECT * FROM raw_material_batches WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!batch) return res.status(404).json({ message: '批次不存在' })
@@ -4213,7 +4281,8 @@ app.delete('/api/raw-material/batches/:id', (req, res) => {
 
 // AI 风险评估
 app.post('/api/raw-material/ai-risk', strictLimiter, async (req, res) => {
-  const { user_id, batch_id, material_id, cert_score, temp_deviation, sensory_abnormal } = req.body
+  const { user_id: rawId, batch_id, material_id, cert_score, temp_deviation, sensory_abnormal } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!batch_id) return res.status(400).json({ message: '缺少批次信息' })
   const batch = db.prepare('SELECT * FROM raw_material_batches WHERE id = ?').get(batch_id)
   if (!batch) return res.status(404).json({ message: '批次不存在' })
@@ -4310,7 +4379,8 @@ app.get('/api/raw-material/concessions', (req, res) => {
 })
 
 app.post('/api/raw-material/concessions', (req, res) => {
-  const { user_id, batch_id, concession_reason, usage_limit, approver, usage_deadline } = req.body
+  const { user_id: rawId, batch_id, concession_reason, usage_limit, approver, usage_deadline } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!batch_id) return res.status(400).json({ message: '缺少批次信息' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM raw_material_concessions WHERE user_id = ?').get(user_id).cnt
   const concession_number = 'RB-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(count + 1).padStart(3, '0')
@@ -4335,7 +4405,8 @@ app.get('/api/product-standards', (req, res) => {
 })
 
 app.post('/api/product-standards', (req, res) => {
-  const { user_id, standard_name, standard_type, standard_code, applicable_products, issued_date, effective_date, expiry_date } = req.body
+  const { user_id: rawId, standard_name, standard_type, standard_code, applicable_products, issued_date, effective_date, expiry_date } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!standard_name) return res.status(400).json({ message: '请填写标准名称' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM product_standards WHERE user_id = ?').get(user_id).cnt
   const standard_number = 'PS-' + String(count + 1).padStart(3, '0')
@@ -4368,7 +4439,8 @@ app.get('/api/product-standards/:id/indicators', (req, res) => {
 })
 
 app.post('/api/product-standards/:id/indicators', (req, res) => {
-  const { user_id, indicator_category, indicator_name, requirement, test_method, internal_control } = req.body
+  const { user_id: rawId, indicator_category, indicator_name, requirement, test_method, internal_control } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!indicator_name) return res.status(400).json({ message: '请填写指标名称' })
   db.prepare(
     'INSERT INTO product_standard_indicators (user_id, standard_id, indicator_category, indicator_name, requirement, test_method, internal_control) VALUES (?,?,?,?,?,?,?)'
@@ -4417,7 +4489,8 @@ app.get('/api/product-inspections/stats', (req, res) => {
 })
 
 app.post('/api/product-inspections', (req, res) => {
-  const { user_id, product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks } = req.body
+  const { user_id: rawId, product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!product_name) return res.status(400).json({ message: '请填写产品名称' })
   db.prepare(
     'INSERT INTO product_inspections (user_id, product_name, product_batch, product_standard_id, production_date, inspection_date, inspector, inspection_type, sample_quantity, sensory_check, 理化_check, micro_check, net_weight_check, conclusion, unqualified_items, remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
@@ -4455,7 +4528,8 @@ app.get('/api/test-items', (req, res) => {
 })
 
 app.post('/api/test-items', (req, res) => {
-  const { user_id, item_name, test_method, method_name, detection_limit, applicable_scope, equipment } = req.body
+  const { user_id: rawId, item_name, test_method, method_name, detection_limit, applicable_scope, equipment } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!item_name) return res.status(400).json({ message: '请填写检验项目' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM test_items WHERE user_id = ?').get(user_id).cnt
   const item_number = 'TI-' + String(count + 1).padStart(3, '0')
@@ -4517,7 +4591,8 @@ app.get('/api/samples/stats', (req, res) => {
 })
 
 app.post('/api/samples', (req, res) => {
-  const { user_id, sample_type, related_batch, material_product_name, sample_quantity, sample_date, storage_location, storage_condition, retention_days, sampler } = req.body
+  const { user_id: rawId, sample_type, related_batch, material_product_name, sample_quantity, sample_date, storage_location, storage_condition, retention_days, sampler } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!material_product_name) return res.status(400).json({ message: '请填写原料/产品名称' })
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const count = db.prepare("SELECT COUNT(*) AS cnt FROM samples WHERE user_id = ? AND sample_number LIKE 'SY-' || ? || '%'").get(user_id, today).cnt
@@ -4544,7 +4619,8 @@ app.put('/api/samples/:id', (req, res) => {
 
 app.post('/api/samples/:id/dispose', (req, res) => {
   const { id } = req.params
-  const { user_id, disposal_method, disposer, remark } = req.body
+  const { user_id: rawId, disposal_method, disposer, remark } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const sample = db.prepare('SELECT * FROM samples WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!sample) return res.status(404).json({ message: '留样不存在' })
   db.prepare('INSERT INTO sample_disposal (user_id, sample_id, disposal_method, disposer, disposal_date, remark) VALUES (?,?,?,?,?,?)').run(user_id, id, disposal_method || '销毁', disposer || '', new Date().toISOString().slice(0, 10), remark || '')
@@ -4555,7 +4631,8 @@ app.post('/api/samples/:id/dispose', (req, res) => {
 // ---- 批次追溯 ----
 
 app.post('/api/traceability/forward', (req, res) => {
-  const { user_id, batch_number } = req.body
+  const { user_id: rawId, batch_number } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!batch_number) return res.status(400).json({ message: '请输入原料批次号' })
   // 查找原料批次
   const batch = db.prepare('SELECT * FROM raw_material_batches WHERE batch_number = ? AND user_id = ?').get(batch_number, user_id)
@@ -4576,7 +4653,8 @@ app.post('/api/traceability/forward', (req, res) => {
 })
 
 app.post('/api/traceability/backward', (req, res) => {
-  const { user_id, batch_number } = req.body
+  const { user_id: rawId, batch_number } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!batch_number) return res.status(400).json({ message: '请输入成品批次号' })
   // 这里假设成品批次也以 FG- 开头，关联到原料批次
   const traceChain = {
@@ -4607,7 +4685,8 @@ app.get('/api/non-conforming', (req, res) => {
 })
 
 app.post('/api/non-conforming', (req, res) => {
-  const { user_id, source_type, related_batch, nc_description, severity } = req.body
+  const { user_id: rawId, source_type, related_batch, nc_description, severity } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!nc_description) return res.status(400).json({ message: '请填写不合格描述' })
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const count = db.prepare("SELECT COUNT(*) AS cnt FROM non_conforming WHERE user_id = ? AND nc_number LIKE 'NC-' || ? || '%'").get(user_id, today).cnt
@@ -4631,7 +4710,8 @@ app.put('/api/non-conforming/:id', (req, res) => {
 
 app.post('/api/non-conforming/:id/action', (req, res) => {
   const { id } = req.params
-  const { user_id, action_type, handler, verify_result } = req.body
+  const { user_id: rawId, action_type, handler, verify_result } = req.body
+  const user_id = getEffectiveUserId(rawId)
   const nc = db.prepare('SELECT * FROM non_conforming WHERE id = ? AND user_id = ?').get(id, user_id)
   if (!nc) return res.status(404).json({ message: '记录不存在' })
   db.prepare(
@@ -4666,7 +4746,8 @@ app.get('/api/standard-changes', (req, res) => {
 })
 
 app.post('/api/standard-changes', (req, res) => {
-  const { user_id, standard_id, change_type, change_content, impact_assessment } = req.body
+  const { user_id: rawId, standard_id, change_type, change_content, impact_assessment } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!change_content) return res.status(400).json({ message: '请填写变更内容' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM standard_changes WHERE user_id = ?').get(user_id).cnt
   const change_number = 'SC-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(count + 1).padStart(3, '0')
@@ -4770,7 +4851,8 @@ app.get('/api/personnel/stats', (req, res) => {
 })
 
 app.post('/api/personnel', (req, res) => {
-  const { user_id, name, department, position, phone, entry_date, health_cert_expiry, remarks } = req.body
+  const { user_id: rawId, name, department, position, phone, entry_date, health_cert_expiry, remarks } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!name) return res.status(400).json({ message: '请填写姓名' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
   const employee_number = 'RY-' + String(count + 1).padStart(3, '0')
@@ -4911,7 +4993,8 @@ app.get('/api/third-party/stats', (req, res) => {
 })
 
 app.post('/api/third-party', (req, res) => {
-  const { user_id, vendor_name, vendor_type, contact_person, phone, address, qualification_expiry, service_scope, remarks } = req.body
+  const { user_id: rawId, vendor_name, vendor_type, contact_person, phone, address, qualification_expiry, service_scope, remarks } = req.body
+  const user_id = getEffectiveUserId(rawId)
   if (!vendor_name) return res.status(400).json({ message: '请填写名称' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM third_party WHERE user_id = ?').get(user_id).cnt
   const vendor_number = 'SF-' + String(count + 1).padStart(3, '0')

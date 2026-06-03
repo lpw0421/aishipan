@@ -103,12 +103,13 @@ const routes = [
       },
       {
         path: 'complaint',
-        redirect: '/raw-material/product-standards',
+        redirect: '/complaint/list',
         children: [
-          { path: 'dashboard', redirect: '/raw-material/product-standards' },
-          { path: 'list', redirect: '/raw-material/product-standards' },
-          { path: 'handle', redirect: '/raw-material/product-standards' },
-          { path: 'satisfaction', redirect: '/raw-material/product-standards' }
+          { path: '', component: () => import('../views/raw-material/ComplaintWrapper.vue') },
+          { path: 'dashboard', component: () => import('../views/raw-material/ComplaintWrapper.vue') },
+          { path: 'list', component: () => import('../views/raw-material/ComplaintWrapper.vue') },
+          { path: 'handle', component: () => import('../views/raw-material/ComplaintWrapper.vue') },
+          { path: 'satisfaction', component: () => import('../views/raw-material/ComplaintWrapper.vue') }
         ]
       },
       {

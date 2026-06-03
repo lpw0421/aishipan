@@ -83,6 +83,11 @@
           <span>体系文件</span>
         </el-menu-item>
 
+        <el-menu-item index="/complaint">
+          <el-icon><WarningFilled /></el-icon>
+          <span>客诉管理</span>
+        </el-menu-item>
+
         <el-sub-menu index="/third-party">
           <template #title>
             <el-icon><Connection /></el-icon>

@@ -118,9 +118,7 @@
       </el-table>
 
       <!-- 空状态 -->
-      <el-empty v-if="!loading && filteredList.length === 0 && !keyword" description="原料库暂无数据">
-        <el-button type="primary" @click="openAdd">新增原料</el-button>
-      </el-empty>
+      <el-empty v-if="!loading && filteredList.length === 0 && !keyword" description="原料库暂无数据" />
       <el-empty v-if="!loading && filteredList.length === 0 && keyword" description="未找到匹配的原料，请调整搜索条件">
         <el-button @click="clearAllFilters">清除筛选</el-button>
       </el-empty>
