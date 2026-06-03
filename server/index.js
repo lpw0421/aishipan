@@ -356,6 +356,7 @@ app.put('/api/user/password', (req, res) => {
   const user_id = getEffectiveUserId(rawId)
   if (!user_id || !oldPassword || !newPassword) return res.status(400).json({ message: '参数不完整' })
   if (newPassword.length < 6) return res.status(400).json({ message: '新密码至少6位' })
+  if (oldPassword === newPassword) return res.status(400).json({ message: '新密码不能与原密码相同' })
   const user = db.prepare('SELECT password FROM users WHERE id = ?').get(user_id)
   if (!user || user.password !== hashPassword(oldPassword)) return res.status(400).json({ message: '原密码错误' })
   db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(newPassword), user_id)
