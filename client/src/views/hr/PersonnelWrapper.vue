@@ -135,7 +135,7 @@ const list=ref([]), expandedRows=ref([]), depts=ref([]), positions=ref([]), sele
 const aiText=ref(''), aiLoading=ref(false), tableRef=ref(null)
 
 const stats = reactive({ total:0, active:0, expiringSoon:0, expired:0, hcNormal:0 })
-const hasFilter = computed(()=>keyword.value||filterStatus.value!=='全部'||filterHealth.value!=='全部'||filterDept.value)
+const hasFilter = computed(()=>!!(keyword.value||filterStatus.value!=='全部'||filterHealth.value!=='全部'||filterDept.value))
 const emptyDesc = computed(()=>keyword.value?`未找到"${keyword.value}"相关结果`:'暂无匹配人员')
 
 const statusTags=[{l:'全部',v:'全部'},{l:'在职',v:'在职'},{l:'离职',v:'离职'},{l:'试用期',v:'试用期'}]
@@ -155,7 +155,7 @@ const fetchData=async()=>{loading.value=true;try{
   positions.value=[...new Set(persons.map(p=>p.position).filter(Boolean))]
   const merged=persons.map(p=>{const hc=healths.find(h=>h.employee_name===p.name);const s=getHCStatus(hc?.expiry_date||p.health_cert_expiry)
     if(s==='临期')stats.expiringSoon++;if(s==='过期')stats.expired++;if(s==='正常')stats.hcNormal++
-    return{...p,health_cert_expiry:hc?.expiry_date||p.health_cert_expiry||'',hc_number:hc?.cert_number||p.hc_number||'',hcStatus:s,
+    return{...p,health_cert_expiry:hc?.expiry_date||p.health_cert_expiry||'',hc_number:p.hc_number||'',hcStatus:s,
       hcLabel:s==='正常'?'正常':s==='临期'?'临期':s==='过期'?'已过期':'无证件',
       hcCls:s==='正常'?'ok':s==='临期'?'warn':s==='过期'?'bad':'none',statusCls:p.status==='在职'?'ok':p.status==='试用期'?'trial':'off'}})
   let r=merged

@@ -4868,14 +4868,14 @@ app.get('/api/personnel/stats', (req, res) => {
 })
 
 app.post('/api/personnel', (req, res) => {
-  const { user_id: rawId, name, department, position, phone, entry_date, health_cert_expiry, remarks } = req.body
+  const { user_id: rawId, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks } = req.body
   const user_id = getEffectiveUserId(rawId)
   if (!name) return res.status(400).json({ message: '请填写姓名' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
   const employee_number = 'RY-' + String(count + 1).padStart(3, '0')
   db.prepare(
-    'INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, health_cert_expiry, remarks) VALUES (?,?,?,?,?,?,?,?,?)'
-  ).run(user_id, employee_number, name, department || '', position || '', phone || '', entry_date || '', health_cert_expiry || '', remarks || '')
+    'INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks) VALUES (?,?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, employee_number, name, department || '', position || '', phone || '', entry_date || '', health_cert_expiry || '', hc_number || '', remarks || '')
   res.json({ message: '人员添加成功' })
 })
 
