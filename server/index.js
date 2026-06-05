@@ -902,6 +902,7 @@ app.post('/api/certificates/batch-delete', (req, res) => {
 
 app.get('/api/product-reports', (req, res) => {
   const { user_id, keyword, report_type, conclusion } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM product_reports WHERE user_id = ?'
   const params = [user_id]
   if (keyword) { sql += ' AND (product_name LIKE ? OR report_number LIKE ? OR agency_name LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%', '%'+keyword+'%') }
@@ -983,6 +984,7 @@ app.get('/api/product-reports/export', (req, res) => {
 
 app.get('/api/sys-docs', (req, res) => {
   const { user_id, doc_type, keyword, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM sys_docs WHERE user_id = ?'
   const params = [user_id]
   if (doc_type) { sql += ' AND doc_type = ?'; params.push(doc_type) }
@@ -1050,6 +1052,7 @@ app.post('/api/sys-docs/batch-delete', (req, res) => {
 
 app.get('/api/sys-docs/export', (req, res) => {
   const { user_id, doc_type } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM sys_docs WHERE user_id = ?'
   const params = [user_id]
   if (doc_type) { sql += ' AND doc_type = ?'; params.push(doc_type) }
@@ -1079,6 +1082,7 @@ app.get('/api/sys-docs/:id/versions', (req, res) => {
 // ---- 培训计划 ----
 app.get('/api/training/plans', (req, res) => {
   const { user_id, training_type, status, keyword } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM training_plans WHERE user_id = ?'; const params = [user_id]
   if (training_type) { sql += ' AND training_type = ?'; params.push(training_type) }
   if (status) { sql += ' AND status = ?'; params.push(status) }
@@ -1108,6 +1112,7 @@ app.delete('/api/training/plans/:id', (req, res) => {
 // ---- 培训课程 ----
 app.get('/api/training/courses', (req, res) => {
   const { user_id, category, keyword } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM training_courses WHERE user_id = ?'; const params = [user_id]
   if (category) { sql += ' AND category = ?'; params.push(category) }
   if (keyword) { sql += ' AND (course_name LIKE ? OR course_number LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%') }
@@ -1140,6 +1145,7 @@ app.delete('/api/training/courses/:id', (req, res) => {
 // ---- 培训记录 ----
 app.get('/api/training/records', (req, res) => {
   const { user_id, keyword, training_type, department } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM training_records WHERE user_id = ?'; const params = [user_id]
   if (training_type) { sql += ' AND training_type = ?'; params.push(training_type) }
   if (department) { sql += ' AND department = ?'; params.push(department) }
@@ -1173,6 +1179,7 @@ app.delete('/api/training/records/:id', (req, res) => {
 // ---- 考核管理 ----
 app.get('/api/training/exams', (req, res) => {
   const { user_id, keyword, result, exam_method } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM training_exams WHERE user_id = ?'; const params = [user_id]
   if (result) { sql += ' AND result = ?'; params.push(result) }
   if (exam_method) { sql += ' AND exam_method = ?'; params.push(exam_method) }
@@ -1206,6 +1213,7 @@ app.delete('/api/training/exams/:id', (req, res) => {
 // ---- 培训证书 ----
 app.get('/api/training/certs', (req, res) => {
   const { user_id, keyword, cert_type } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM training_certs WHERE user_id = ?'; const params = [user_id]
   if (cert_type) { sql += ' AND cert_type = ?'; params.push(cert_type) }
   if (keyword) { sql += ' AND (employee_name LIKE ? OR cert_number LIKE ?)'; params.push('%'+keyword+'%', '%'+keyword+'%') }
@@ -4177,6 +4185,7 @@ app.post('/api/raw-materials/:id/standards', (req, res) => {
 
 app.get('/api/raw-material/batches', (req, res) => {
   const { user_id, keyword, status, judge_result } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM raw_material_batches WHERE user_id = ?'
   const params = [user_id]
   if (status) { sql += ' AND status = ?'; params.push(status) }
@@ -4395,6 +4404,7 @@ app.post('/api/raw-material/concessions', (req, res) => {
 
 app.get('/api/product-standards', (req, res) => {
   const { user_id, keyword, standard_type, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM product_standards WHERE user_id = ?'
   const params = [user_id]
   if (standard_type) { sql += ' AND standard_type = ?'; params.push(standard_type) }
@@ -4469,6 +4479,7 @@ app.delete('/api/product-standards/indicators/:id', (req, res) => {
 
 app.get('/api/product-inspections', (req, res) => {
   const { user_id, keyword, conclusion, inspection_type } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM product_inspections WHERE user_id = ?'
   const params = [user_id]
   if (conclusion) { sql += ' AND conclusion = ?'; params.push(conclusion) }
@@ -4519,6 +4530,7 @@ app.delete('/api/product-inspections/:id', (req, res) => {
 
 app.get('/api/test-items', (req, res) => {
   const { user_id, keyword, method_status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM test_items WHERE user_id = ?'
   const params = [user_id]
   if (method_status) { sql += ' AND method_status = ?'; params.push(method_status) }
@@ -4560,6 +4572,7 @@ app.delete('/api/test-items/:id', (req, res) => {
 
 app.get('/api/samples', (req, res) => {
   const { user_id, keyword, sample_type, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM samples WHERE user_id = ?'
   const params = [user_id]
   if (sample_type) { sql += ' AND sample_type = ?'; params.push(sample_type) }
@@ -4674,6 +4687,7 @@ app.post('/api/traceability/backward', (req, res) => {
 
 app.get('/api/non-conforming', (req, res) => {
   const { user_id, keyword, source_type, severity, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM non_conforming WHERE user_id = ?'
   const params = [user_id]
   if (source_type) { sql += ' AND source_type = ?'; params.push(source_type) }
@@ -4736,6 +4750,7 @@ app.delete('/api/non-conforming/:id', (req, res) => {
 
 app.get('/api/standard-changes', (req, res) => {
   const { user_id, keyword, change_type, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM standard_changes WHERE user_id = ?'
   const params = [user_id]
   if (change_type) { sql += ' AND change_type = ?'; params.push(change_type) }
@@ -4832,7 +4847,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS personnel (
   FOREIGN KEY (user_id) REFERENCES users(id))`)
 
 app.get('/api/personnel', (req, res) => {
-  const { user_id, keyword, department, status } = req.query
+  let { user_id, keyword, department, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM personnel WHERE user_id = ?'
   const params = [user_id]
   if (department) { sql += ' AND department = ?'; params.push(department) }
@@ -4975,6 +4991,7 @@ app.get('/api/search/cache', (req, res) => {
 
 app.get('/api/third-party', (req, res) => {
   const { user_id, keyword, vendor_type, status } = req.query
+  user_id = getEffectiveUserId(user_id)
   let sql = 'SELECT * FROM third_party WHERE user_id = ?'
   const params = [user_id]
   if (vendor_type) { sql += ' AND vendor_type = ?'; params.push(vendor_type) }

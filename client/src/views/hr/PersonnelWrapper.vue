@@ -113,6 +113,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
+import request from '../../utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const user = JSON.parse(localStorage.getItem('user') || '{}')
@@ -157,11 +158,11 @@ const fetchData = async () => {
   loading.value = true
   try {
     const [pRes, hRes] = await Promise.all([
-      axios.get('/api/personnel', { params: { user_id: userId } }),
-      axios.get('/api/health-certs', { params: { user_id: userId } })
+      request.get('/personnel', { params: { user_id: userId } }),
+      request.get('/health-certs', { params: { user_id: userId } })
     ])
-    const persons = pRes.data.list || []
-    const healths = hRes.data.list || []
+    const persons = pRes.list || []
+    const healths = hRes.list || []
 
     // 统计
     stats.total = persons.length
@@ -197,7 +198,7 @@ const fetchData = async () => {
       result = result.filter(r => (r.name||'').includes(kw) || (r.employee_number||'').includes(kw) || (r.position||'').includes(kw))
     }
     list.value = result
-  } catch {} finally { loading.value = false }
+  } catch (e) { console.error('[人员] 加载失败:', e) } finally { loading.value = false }
 }
 
 const toggleCard = (card) => {
@@ -240,7 +241,8 @@ const save = async () => {
       await axios.post('/api/personnel', { user_id: userId, ...form })
       ElMessage.success('添加成功')
     }
-    showForm.value = false; resetForm(); fetchData()
+    showForm.value = false; resetForm()
+    await fetchData()
   } catch (e) { ElMessage.error(e.response?.data?.message||'操作失败') }
   finally { saving.value = false }
 }
