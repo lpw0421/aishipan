@@ -44,9 +44,10 @@
 
     <!-- 表格 -->
     <div class="table-wrap">
-      <el-table :data="list" v-loading="loading" row-key="id" @expand-change="onExpand" :expand-row-keys="expandedRows">
+      <el-table :data="list" v-loading="loading" row-key="id" @expand-change="onExpand" :expand-row-keys="expandedRows" @selection-change="onSelectionChange" ref="tableRef">
+        <el-table-column type="selection" width="40" />
         <el-table-column type="expand"><template #default="{row}">
-          <div class="expand-panel">
+          <div class="expand-panel" :class="{'hc-expired':row.hcStatus==='过期','hc-expiring':row.hcStatus==='临期'}">
             <span>电话：{{ row.phone || '—' }}</span>
             <span>入职日期：{{ row.entry_date || '—' }}</span>
             <el-button v-if="row.hcStatus==='临期'" size="small" class="btn-renew">续办健康证</el-button>
@@ -66,9 +67,22 @@
           <el-button link size="small" @click="showDetail(row)">详情</el-button>
         </template></el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length===0" description="暂无匹配人员">
-        <el-button v-if="!keyword&&filterStatus==='全部'&&filterHealth==='全部'" type="primary" @click="openAdd">新增员工</el-button>
+      <el-empty v-if="!loading && list.length===0" :description="emptyDesc">
+        <template v-if="!keyword&&filterStatus==='全部'&&filterHealth==='全部'&&!filterDept">
+          <el-button type="primary" @click="openAdd">+ 新增员工</el-button>
+        </template>
+        <template v-else>
+          <el-button link type="primary" @click="clearFilters">清除筛选</el-button>
+        </template>
       </el-empty>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div class="batch-bar" v-if="selectedRows.length>0">
+      <span>已选 {{ selectedRows.length }} 项</span>
+      <el-button size="small" @click="batchExport">批量导出</el-button>
+      <el-button size="small" type="warning" @click="batchUpdateHC">批量更新健康证</el-button>
+      <el-button size="small" @click="tableRef?.clearSelection()">取消</el-button>
     </div>
 
     <!-- 新增/编辑弹窗 -->
@@ -105,8 +119,14 @@ const user = JSON.parse(localStorage.getItem('user') || '{}')
 const userId = user.id
 const loading = ref(false), saving = ref(false), showForm = ref(false), editingId = ref(null)
 const keyword = ref(''), filterStatus = ref('全部'), filterHealth = ref('全部'), filterDept = ref(''), activeCard = ref('')
-const list = ref([]), expandedRows = ref([]), depts = ref([])
-const aiText = ref(''), aiLoading = ref(false)
+const list = ref([]), expandedRows = ref([]), depts = ref([]), selectedRows = ref([])
+const aiText = ref(''), aiLoading = ref(false), tableRef = ref(null)
+
+const emptyDesc = computed(() => {
+  if (keyword.value) return `未找到"${keyword.value}"相关结果`
+  if (filterStatus.value!=='全部'||filterHealth.value!=='全部'||filterDept.value) return '暂无匹配人员'
+  return '暂无人员数据'
+})
 
 const stats = reactive({ total: 0, active: 0, expiringSoon: 0, expired: 0 })
 
@@ -199,6 +219,10 @@ const editRow = (row) => {
 const showDetail = (row) => ElMessageBox.alert(`姓名：${row.name}\n部门：${row.department}\n职位：${row.position}\n电话：${row.phone}\n入职：${row.entry_date}\n健康证到期：${row.health_cert_expiry}\n状态：${row.hcLabel}`, '人员详情')
 const viewFiles = (row) => ElMessage.info('附件功能开发中')
 const exportExcel = () => ElMessage.info('导出功能开发中')
+const onSelectionChange = (rows) => { selectedRows.value = rows }
+const clearFilters = () => { keyword.value='';filterStatus.value='全部';filterHealth.value='全部';filterDept.value='';activeCard.value='';fetchData() }
+const batchExport = () => ElMessage.info(`已选${selectedRows.value.length}项，导出开发中`)
+const batchUpdateHC = () => ElMessage.info(`已选${selectedRows.value.length}人，批量更新健康证开发中`)
 
 const resetForm = () => {
   Object.assign(form, { name: '', department: '', position: '', phone: '', entry_date: '', health_cert_expiry: '', status: '在职', remarks: '' })
@@ -297,4 +321,12 @@ onMounted(fetchData)
 .ai-fill-bar{margin-bottom:12px;padding:10px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0}
 .ai-fill-bar .el-button{width:100%}
 .ai-fill-bar :deep(.el-textarea__inner){font-size:13px}
+
+/* 批量操作栏 */
+.batch-bar{position:sticky;bottom:0;background:white;border-top:0.5px solid #e0e0e0;padding:8px 16px;display:flex;align-items:center;gap:12px;border-radius:0 0 10px 10px;margin-top:-1px;z-index:10}
+.batch-bar span{font-size:13px;color:#666;font-weight:500}
+
+/* 展开行过期标记 */
+.expand-panel.hc-expired{background:#FFF5F5}
+.expand-panel.hc-expiring{background:#FFFBF0}
 </style>
