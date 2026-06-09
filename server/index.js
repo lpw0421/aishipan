@@ -5206,22 +5206,36 @@ app.post('/api/chat', async (req, res) => {
   let dataContext = ''
   if (userId) {
     try {
-      const personnelList = db.prepare('SELECT id, name, department, position FROM personnel WHERE user_id = ?').all(userId)
-      const names = personnelList.map(p => p.name)
+      // 从 personnel 和 health_certs 两张表收集所有员工姓名
+      const persons = db.prepare('SELECT id, name, department, position, phone, entry_date, status, health_cert_expiry, remarks FROM personnel WHERE user_id = ?').all(userId)
+      const healthEmps = db.prepare('SELECT DISTINCT employee_name FROM health_certs WHERE user_id = ? AND employee_name != ""').all(userId)
+      const allNames = [...new Set([...persons.map(p => p.name), ...healthEmps.map(h => h.employee_name)])].filter(n => n && n.length >= 2)
 
-      // 检查消息中是否提到任一员工姓名
-      const mentionedNames = names.filter(n => n && n.length >= 2 && message.includes(n))
+      // 匹配：消息包含姓名 或 姓名包含消息关键词
+      const mentionedNames = allNames.filter(n => {
+        if (message.includes(n)) return true
+        // 提取消息中的2字以上中文词组，与姓名做模糊匹配
+        const words = message.match(/[一-龥]{2,4}/g) || []
+        return words.some(w => n.includes(w))
+      })
 
       if (mentionedNames.length > 0) {
         const contextParts = []
         for (const name of mentionedNames) {
-          const person = personnelList.find(p => p.name === name)
-          if (!person) continue
+          // 先查 personnel
+          const person = persons.find(p => p.name === name)
+          // 尝试模糊匹配
+          const personFuzzy = !person ? persons.find(p => name.includes(p.name) || p.name.includes(name)) : person
 
-          // 健康证信息
+          // 健康证（优先从 personnel 取，其次 health_certs）
           const hc = db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
-          const personHC = db.prepare('SELECT health_cert_expiry FROM personnel WHERE id = ?').get(person.id)
-          const expiryDate = hc?.expiry_date || personHC?.health_cert_expiry || ''
+          const hcFuzzy = !hc ? db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name LIKE ?').get(userId, `%${name}%`) : null
+          const hcData = hc || hcFuzzy
+
+          let expiryDate = ''
+          if (personFuzzy?.health_cert_expiry) expiryDate = personFuzzy.health_cert_expiry
+          if (!expiryDate && hcData?.expiry_date) expiryDate = hcData.expiry_date
+          if (!expiryDate) expiryDate = person?.health_cert_expiry || ''
 
           let hcStatus = '无记录'
           if (expiryDate) {
@@ -5229,15 +5243,21 @@ app.post('/api/chat', async (req, res) => {
             hcStatus = days < 0 ? `已过期${Math.abs(days)}天` : days <= 30 ? `${days}天后到期（临期）` : `有效（${days}天后到期）`
           }
 
+          const dept = personFuzzy?.department || person?.department || '未填'
+          const pos = personFuzzy?.position || person?.position || '未填'
+          const phone = personFuzzy?.phone || person?.phone || ''
+          const entry = personFuzzy?.entry_date || person?.entry_date || ''
+          const status = personFuzzy?.status || person?.status || ''
+
           // 培训记录
-          const trainings = db.prepare("SELECT course_name, training_date, exam_score FROM training_records WHERE user_id = ? AND employee_name = ? ORDER BY training_date DESC LIMIT 10").all(userId, name)
+          const trainings = db.prepare("SELECT course_name, training_date, exam_score FROM training_records WHERE user_id = ? AND employee_name LIKE ? ORDER BY training_date DESC LIMIT 10").all(userId, `%${name}%`)
           const trainSummary = trainings.length > 0
             ? trainings.map(t => `${t.training_date} ${t.course_name} ${t.exam_score ? `得分${t.exam_score}` : ''}`).join('；')
             : '无培训记录'
 
-          contextParts.push(`【${name}】部门：${person.department || '未填'} | 职位：${person.position || '未填'} | 健康证：${expiryDate}（${hcStatus}）| 培训：${trainSummary}`)
+          contextParts.push(`【${name}】部门：${dept} | 职位：${pos} | 电话：${phone || '未填'} | 入职：${entry || '未填'} | 状态：${status || '未知'} | 健康证到期：${expiryDate || '无'}（${hcStatus}）| 培训：${trainSummary}`)
         }
-        dataContext = '\n\n以下是从数据库查询到的实际数据，请基于这些数据回答用户问题：\n' + contextParts.join('\n')
+        dataContext = '\n\n以下是从数据库查询到的实际数据，请基于这些数据回答用户问题，严禁编造：\n' + contextParts.join('\n')
       }
     } catch (e) { /* 查询失败不影响对话 */ }
   }
