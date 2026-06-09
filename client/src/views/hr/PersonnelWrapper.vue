@@ -56,6 +56,7 @@
             <div v-if="row.remarks" class="exr">备注：{{ row.remarks }}</div>
             <div v-if="row.hcStatus==='临期'" class="exw o">⚠ 该员工健康证将于 {{ row.health_cert_expiry }} 到期，请及时安排续办</div>
             <div v-if="row.hcStatus==='过期'" class="exw r">⚠ 该员工健康证已于 {{ row.health_cert_expiry }} 过期，请立即续办</div>
+            <div v-if="row.file_path" class="exf"><a :href="'/uploads/'+row.file_path" target="_blank">📎 查看附件</a></div>
           </div>
         </template></el-table-column>
         <el-table-column prop="employee_number" label="编号" width="80" />
@@ -113,6 +114,12 @@
           <el-col :span="12"><el-form-item label="健康证到期"><el-date-picker v-model="form.health_cert_expiry" type="date" style="width:100%" value-format="YYYY-MM-DD" /></el-form-item></el-col>
         </el-row>
         <el-form-item label="健康证号"><el-input v-model="form.hc_number" placeholder="选填" /></el-form-item>
+        <el-form-item label="附件">
+          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" :on-change="onFileChange" :on-remove="onFileRemove" accept="image/*,.pdf">
+            <el-button size="small">选择文件</el-button>
+            <span class="upload-tip">支持图片/PDF</span>
+          </el-upload>
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remarks" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="showForm=false">取消</el-button><el-button type="primary" @click="save" :loading="saving">{{ editingId?'保存修改':'确认新增' }}</el-button></template>
@@ -175,7 +182,13 @@ const exportExcel=()=>{window.open('/api/personnel/export?user_id='+userId)}
 const batchExport=()=>{const ids=selectedRows.value.map(r=>r.id).join(',');window.open('/api/personnel/export?user_id='+userId+'&ids='+ids)}
 const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}
-const save=async()=>{if(!form.name)return ElMessage.warning('请填写姓名');saving.value=true;try{if(editingId.value)await axios.put(`/api/personnel/${editingId.value}`,{user_id:userId,...form});else await axios.post('/api/personnel',{user_id:userId,...form});ElMessage.success(editingId.value?'更新成功':'添加成功');showForm.value=false;resetForm();await fetchData()}catch(e){ElMessage.error(e.response?.data?.message||'操作失败')}finally{saving.value=false}}
+const uploadFile=ref(null)
+const onFileChange=(file)=>{uploadFile.value=file.raw}
+const onFileRemove=()=>{uploadFile.value=null}
+const save=async()=>{if(!form.name)return ElMessage.warning('请填写姓名');saving.value=true;try{
+  if(uploadFile.value){const fd=new FormData();fd.append('file',uploadFile.value);const upRes=await axios.post('/api/upload',fd);form.file_path=upRes.data.filename}
+  if(editingId.value)await axios.put(`/api/personnel/${editingId.value}`,{user_id:userId,...form});else await axios.post('/api/personnel',{user_id:userId,...form})
+  ElMessage.success(editingId.value?'更新成功':'添加成功');showForm.value=false;resetForm();uploadFile.value=null;await fetchData()}catch(e){ElMessage.error(e.response?.data?.message||'操作失败')}finally{saving.value=false}}
 const aiFill=async()=>{if(!aiText.value.trim())return;aiLoading.value=true;try{const r=await axios.post('/api/ai/extract-person',{text:aiText.value});if(r.data.method==='ai'){const d=r.data;if(d.name)form.name=d.name;if(d.department)form.department=d.department;if(d.position)form.position=d.position;if(d.phone)form.phone=d.phone;if(d.health_cert_expiry)form.health_cert_expiry=d.health_cert_expiry;if(d.entry_date)form.entry_date=d.entry_date;aiText.value='';ElMessage.success('AI已填写，请核对')}}catch{ElMessage.error('AI异常')}finally{aiLoading.value=false}}
 onMounted(fetchData)
 </script>

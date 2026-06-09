@@ -4915,6 +4915,11 @@ app.delete('/api/personnel/:id', (req, res) => {
   res.json({ message: '人员已删除' })
 })
 
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: '请选择文件' })
+  res.json({ filename: req.file.filename, message: '上传成功' })
+})
+
 app.post('/api/personnel/batch-delete', (req, res) => {
   const user_id = getEffectiveUserId(req.body.user_id)
   const { ids } = req.body
