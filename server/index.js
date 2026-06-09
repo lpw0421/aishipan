@@ -1532,8 +1532,13 @@ app.get('/api/dashboard/report', (req, res) => {
   const certNew = db.prepare("SELECT COUNT(*) AS cnt FROM certificates WHERE user_id = ? AND created_at >= ?").get(userId, rangeStartStr).cnt
   const certExpiring = db.prepare("SELECT COUNT(*) AS cnt FROM certificates WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+30 days')").get(userId, today, today).cnt
 
-  const healthTotal = db.prepare('SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ?').get(userId).cnt
-  const healthExpiring = db.prepare("SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+30 days')").get(userId, today, today).cnt
+  // 健康证数据合并 health_certs + personnel
+  const healthTotalCert = db.prepare('SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ?').get(userId).cnt
+  const healthExpiringCert = db.prepare("SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+30 days')").get(userId, today, today).cnt
+  const healthTotalPerson = db.prepare("SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ? AND health_cert_expiry != '' AND status != '离职'").get(userId).cnt
+  const healthExpiringPerson = db.prepare("SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry >= ? AND health_cert_expiry <= date(?, '+30 days') AND status != '离职'").get(userId, today, today).cnt
+  const healthTotal = healthTotalCert + healthTotalPerson
+  const healthExpiring = healthExpiringCert + healthExpiringPerson
 
   const complaintNew = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND created_at >= ?").get(userId, rangeStartStr).cnt
   const complaintPending = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中')").get(userId).cnt
@@ -1573,10 +1578,17 @@ app.get('/api/dashboard/report', (req, res) => {
     alerts.push({ text: `${c.company_name || ''} ${c.name} ${remaining}天内到期`, urgent: remaining <= 7 })
   })
 
+  // health_certs 表
   const urgentHealth = db.prepare(`SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+${alertDays} days')`).all(userId, today, today)
   urgentHealth.forEach(h => {
     const remaining = Math.ceil((new Date(h.expiry_date) - now) / 86400000)
     alerts.push({ text: `${h.employee_name} 健康证 ${remaining}天内到期`, urgent: remaining <= 7 })
+  })
+  // personnel 表
+  const urgentPersonHealth = db.prepare(`SELECT name, health_cert_expiry FROM personnel WHERE user_id = ? AND health_cert_expiry != '' AND status != '离职' AND health_cert_expiry >= ? AND health_cert_expiry <= date(?, '+${alertDays} days')`).all(userId, today, today)
+  urgentPersonHealth.forEach(h => {
+    const remaining = Math.ceil((new Date(h.health_cert_expiry) - now) / 86400000)
+    alerts.push({ text: `${h.name} 健康证 ${remaining}天内到期`, urgent: remaining <= 7 })
   })
 
   const overdueComplaints = db.prepare("SELECT product_name, created_at FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中') AND created_at <= date(?, '-2 days')").all(userId, today)
@@ -1589,7 +1601,7 @@ app.get('/api/dashboard/report', (req, res) => {
   // 建议
   const suggestions = []
   if (urgentCerts.length > 0) suggestions.push(`尽快联系供应商更新 ${urgentCerts.length} 项即将到期资质`)
-  if (urgentHealth.length > 0) suggestions.push(`安排 ${urgentHealth.length} 名员工进行健康体检`)
+  if (urgentHealth.length + urgentPersonHealth.length > 0) suggestions.push(`安排 ${urgentHealth.length + urgentPersonHealth.length} 名员工进行健康体检`)
   if (complaintPending > 0) suggestions.push(`优先处理 ${complaintPending} 件待处理客诉，避免超时升级`)
   if (deviceAbnormal > 0) suggestions.push(`安排 ${deviceAbnormal} 台异常设备校准或维修`)
   if (pestCount > 0) suggestions.push(`${label}虫害发现${pestCount}次异常，建议加强巡检频率`)
