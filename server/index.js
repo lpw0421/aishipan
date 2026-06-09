@@ -1418,7 +1418,8 @@ app.get('/api/dashboard/health-score', (req, res) => {
   const personHealths2 = db.prepare('SELECT health_cert_expiry AS expiry_date FROM personnel WHERE user_id = ? AND health_cert_expiry != \'\'').all(userId)
   const allHealths2 = [...healths, ...personHealths2]
   const healthTotal = allHealths2.length
-  const healthValid = allHealths2.filter(h => getStatus(h.expiry_date) === 'valid').length
+  // 只要未过期就算有效（临期≠失效）
+  const healthValid = allHealths2.filter(h => getStatus(h.expiry_date) !== 'expired').length
   const healthScore = healthTotal > 0 ? Math.round((healthValid / healthTotal) * 100) : 100
 
   // 3. 原料安全 (权重 25%)
@@ -1554,6 +1555,11 @@ app.get('/api/dashboard/report', (req, res) => {
   const healthTotal = healthTotalCert + healthTotalPerson
   const healthExpiring = healthExpiringCert + healthExpiringPerson
 
+  // 已过期健康证（更紧急）
+  const healthExpiredCert = db.prepare("SELECT COUNT(*) AS cnt FROM health_certs WHERE user_id = ? AND expiry_date != '' AND expiry_date < ?").get(userId, today).cnt
+  const healthExpiredPerson = db.prepare("SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry < ? AND status != '离职'").get(userId, today).cnt
+  const healthExpired = healthExpiredCert + healthExpiredPerson
+
   const complaintNew = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND created_at >= ?").get(userId, rangeStartStr).cnt
   const complaintPending = db.prepare("SELECT COUNT(*) AS cnt FROM complaint_records WHERE user_id = ? AND status IN ('待处理','处理中')").get(userId).cnt
 
@@ -1571,13 +1577,13 @@ app.get('/api/dashboard/report', (req, res) => {
   const overview = []
   if (days > 1) {
     overview.push({ label: certNew > 0 ? `${label}新增资质` : `资质总数`, value: certNew > 0 ? `${certNew} 个（共${certTotal}）` : `${certTotal} 个` + (certExpiring > 0 ? `，${certExpiring}临期` : ''), warn: certExpiring > 0 })
-    overview.push({ label: '健康证', value: healthTotal + ' 人' + (healthExpiring > 0 ? `，${healthExpiring}人将到期` : '，全部有效'), warn: healthExpiring > 0 })
+    overview.push({ label: '健康证', value: healthTotal + ' 人' + (healthExpired > 0 ? `，${healthExpired}人已过期！` : healthExpiring > 0 ? `，${healthExpiring}人临期` : '，全部有效'), warn: healthExpired > 0 || healthExpiring > 0 })
     overview.push({ label: `${label}客诉`, value: `${complaintNew} 件` + (complaintPrev > 0 ? `（${prevLabel}${complaintPrev}件，${complaintNew > complaintPrev ? '↑' : complaintNew < complaintPrev ? '↓' : '→'}）` : ''), warn: complaintNew > 0 })
     overview.push({ label: `${label}验收`, value: `完成 ${reportNew} 批次` })
     overview.push({ label: `${label}培训`, value: `${trainingNew} 次` })
   } else {
     overview.push({ label: '资质总数', value: certTotal + ' 个' + (certExpiring > 0 ? `，${certExpiring}临期` : '，全部正常'), warn: certExpiring > 0 })
-    overview.push({ label: '健康证', value: healthTotal + ' 人' + (healthExpiring > 0 ? `，${healthExpiring}人将到期` : '，全部有效'), warn: healthExpiring > 0 })
+    overview.push({ label: '健康证', value: healthTotal + ' 人' + (healthExpired > 0 ? `，${healthExpired}人已过期！` : healthExpiring > 0 ? `，${healthExpiring}人临期` : '，全部有效'), warn: healthExpired > 0 || healthExpiring > 0 })
     overview.push({ label: '待处理客诉', value: complaintPending + ' 件', warn: complaintPending > 0 })
     overview.push({ label: '原料验收今日', value: '完成 ' + reportNew + ' 批次' })
     overview.push({ label: '设备状态', value: deviceCount + ' 台' + (deviceAbnormal > 0 ? `，${deviceAbnormal}台异常` : '，全部正常'), warn: deviceAbnormal > 0 })
@@ -1592,8 +1598,19 @@ app.get('/api/dashboard/report', (req, res) => {
     alerts.push({ text: `${c.company_name || ''} ${c.name} ${remaining}天内到期`, urgent: remaining <= 7 })
   })
 
-  // health_certs 表
-  const urgentHealth = db.prepare(`SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+${alertDays} days')`).all(userId, today, today)
+  // 已过期的健康证（最优先）
+  const expiredHealthAlerts = db.prepare(`SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ? AND expiry_date != '' AND expiry_date < ?`).all(userId, today)
+  expiredHealthAlerts.forEach(h => {
+    const days = Math.ceil((new Date() - new Date(h.expiry_date)) / 86400000)
+    alerts.push({ text: `⚠️ ${h.employee_name} 健康证已过期${days}天！`, urgent: true })
+  })
+  const expiredPersonAlerts = db.prepare(`SELECT name, health_cert_expiry FROM personnel WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry < ? AND status != '离职'`).all(userId, today)
+  expiredPersonAlerts.forEach(h => {
+    const days = Math.ceil((new Date() - new Date(h.health_cert_expiry)) / 86400000)
+    alerts.push({ text: `⚠️ ${h.name} 健康证已过期${days}天！`, urgent: true })
+  })
+
+  // health_certs 表（临期）
   urgentHealth.forEach(h => {
     const remaining = Math.ceil((new Date(h.expiry_date) - now) / 86400000)
     alerts.push({ text: `${h.employee_name} 健康证 ${remaining}天内到期`, urgent: remaining <= 7 })
@@ -1615,7 +1632,9 @@ app.get('/api/dashboard/report', (req, res) => {
   // 建议
   const suggestions = []
   if (urgentCerts.length > 0) suggestions.push(`尽快联系供应商更新 ${urgentCerts.length} 项即将到期资质`)
-  if (urgentHealth.length + urgentPersonHealth.length > 0) suggestions.push(`安排 ${urgentHealth.length + urgentPersonHealth.length} 名员工进行健康体检`)
+  const totalExpired = expiredHealthAlerts.length + expiredPersonAlerts.length
+  if (totalExpired > 0) suggestions.push(`紧急：${totalExpired} 名员工健康证已过期，立即安排体检！`)
+  else if (urgentHealth.length + urgentPersonHealth.length > 0) suggestions.push(`安排 ${urgentHealth.length + urgentPersonHealth.length} 名员工进行健康体检`)
   if (complaintPending > 0) suggestions.push(`优先处理 ${complaintPending} 件待处理客诉，避免超时升级`)
   if (deviceAbnormal > 0) suggestions.push(`安排 ${deviceAbnormal} 台异常设备校准或维修`)
   if (pestCount > 0) suggestions.push(`${label}虫害发现${pestCount}次异常，建议加强巡检频率`)
@@ -5002,7 +5021,7 @@ function saveHealthSnapshot() {
           const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ? AND expiry_date != ""').all(user_id)
           const personHealths3 = db.prepare('SELECT health_cert_expiry AS expiry_date FROM personnel WHERE user_id = ? AND health_cert_expiry != ""').all(user_id)
           const allHealths3 = [...healths, ...personHealths3]
-          const healthValid = allHealths3.filter(h => getStatus(h.expiry_date) === 'valid').length
+          const healthValid = allHealths3.filter(h => getStatus(h.expiry_date) !== 'expired').length
           const healthScoreVal = allHealths3.length > 0 ? Math.round((healthValid / allHealths3.length) * 100) : 100
       const reportQualified = reports.filter(r => r.conclusion === '合格').length
       const materialScore = reports.length > 0 ? Math.round((reportQualified / reports.length) * 100) : 100

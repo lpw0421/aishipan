@@ -245,7 +245,7 @@
     <!-- ===== 即将过期预警 ===== -->
     <div class="section-card" ref="warningsRef">
       <div class="section-title">
-        即将过期预警（30天内）
+        证照预警
         <span class="badge">{{ warnings.length }} 项</span>
       </div>
 
