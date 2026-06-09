@@ -1254,12 +1254,14 @@ app.get('/api/dashboard/stats', (req, res) => {
   const certStats = { total: certs.length, valid: 0, expiring_soon: 0, expired: 0 }
   certs.forEach(c => { certStats[getStatus(c.expiry_date, c.is_permanent)]++ })
 
-  // 健康证统计数据
-  const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ?').all(userId)
-  const healthStats = { total: healths.length, valid: 0, expiring_soon: 0, expired: 0 }
-  healths.forEach(h => { healthStats[getStatus(h.expiry_date)]++ })
+  // 健康证统计数据（合并 health_certs 表 + personnel 表）
+  const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ? AND expiry_date != \'\'').all(userId)
+  const personHealths = db.prepare('SELECT health_cert_expiry AS expiry_date FROM personnel WHERE user_id = ? AND health_cert_expiry != \'\'').all(userId)
+  const allHealths = [...healths, ...personHealths]
+  const healthStats = { total: allHealths.length, valid: 0, expiring_soon: 0, expired: 0 }
+  allHealths.forEach(h => { healthStats[getStatus(h.expiry_date)]++ })
 
-  // 预警列表：合并资质和健康证中 30 天内到期且尚未过期的数据
+  // 预警列表：合并资质 + 健康证 + 人员健康证 中 30 天内到期且尚未过期的数据
   const today = new Date().toISOString().slice(0, 10)
   const deadline = new Date()
   deadline.setDate(deadline.getDate() + 30)
@@ -1275,6 +1277,13 @@ app.get('/api/dashboard/stats', (req, res) => {
     SELECT employee_name AS title, expiry_date, 'health_cert' AS type, id
     FROM health_certs
     WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= ?
+  `).all(userId, today, deadlineStr)
+
+  // 人员表中的健康证预警
+  const warnPersonHealths = db.prepare(`
+    SELECT name AS title, health_cert_expiry AS expiry_date, 'health_cert' AS type, id
+    FROM personnel
+    WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry >= ? AND health_cert_expiry <= ?
   `).all(userId, today, deadlineStr)
 
   // 虫害管理统计数据
@@ -1344,7 +1353,7 @@ app.get('/api/dashboard/stats', (req, res) => {
   ).all(userId, today, deadlineStr)
 
   // 合并并按到期时间升序排列
-  const warnings = [...warnCerts, ...warnHealths, ...warnPestSupplier, ...warnPestStaffCerts, ...warnProductReports, ...warnTrainingCerts]
+  const warnings = [...warnCerts, ...warnHealths, ...warnPersonHealths, ...warnPestSupplier, ...warnPestStaffCerts, ...warnProductReports, ...warnTrainingCerts]
     .sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))
     .map(item => ({
       ...item,
@@ -1390,10 +1399,12 @@ app.get('/api/dashboard/health-score', (req, res) => {
   const certValid = certs.filter(c => getStatus(c.expiry_date, c.is_permanent) === 'valid').length
   const certScore = certTotal > 0 ? Math.round((certValid / certTotal) * 100) : 100
 
-  // 2. 人员健康 (权重 20%)
-  const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ?').all(userId)
-  const healthTotal = healths.length
-  const healthValid = healths.filter(h => getStatus(h.expiry_date) === 'valid').length
+  // 2. 人员健康 (权重 20%) — 合并 health_certs + personnel 健康证到期
+  const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ? AND expiry_date != \'\'').all(userId)
+  const personHealths2 = db.prepare('SELECT health_cert_expiry AS expiry_date FROM personnel WHERE user_id = ? AND health_cert_expiry != \'\'').all(userId)
+  const allHealths2 = [...healths, ...personHealths2]
+  const healthTotal = allHealths2.length
+  const healthValid = allHealths2.filter(h => getStatus(h.expiry_date) === 'valid').length
   const healthScore = healthTotal > 0 ? Math.round((healthValid / healthTotal) * 100) : 100
 
   // 3. 原料安全 (权重 25%)
@@ -4962,11 +4973,11 @@ function saveHealthSnapshot() {
       const certValid = certs.filter(c => getStatus(c.expiry_date, c.is_permanent) === 'valid').length
       const certScore = certs.length > 0 ? Math.round((certValid / certs.length) * 100) : 100
 
-      const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ?').all(user_id)
-      const healthValid = healths.filter(h => getStatus(h.expiry_date) === 'valid').length
-      const healthScoreVal = healths.length > 0 ? Math.round((healthValid / healths.length) * 100) : 100
-
-      const reports = db.prepare("SELECT conclusion FROM product_reports WHERE user_id = ?").all(user_id)
+          const healths = db.prepare('SELECT expiry_date FROM health_certs WHERE user_id = ? AND expiry_date != ""').all(user_id)
+          const personHealths3 = db.prepare('SELECT health_cert_expiry AS expiry_date FROM personnel WHERE user_id = ? AND health_cert_expiry != ""').all(user_id)
+          const allHealths3 = [...healths, ...personHealths3]
+          const healthValid = allHealths3.filter(h => getStatus(h.expiry_date) === 'valid').length
+          const healthScoreVal = allHealths3.length > 0 ? Math.round((healthValid / allHealths3.length) * 100) : 100
       const reportQualified = reports.filter(r => r.conclusion === '合格').length
       const materialScore = reports.length > 0 ? Math.round((reportQualified / reports.length) * 100) : 100
 
