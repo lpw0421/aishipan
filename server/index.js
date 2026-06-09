@@ -1286,6 +1286,20 @@ app.get('/api/dashboard/stats', (req, res) => {
     WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry >= ? AND health_cert_expiry <= ?
   `).all(userId, today, deadlineStr)
 
+  // 已过期的健康证（health_certs 表）
+  const expiredHealths = db.prepare(`
+    SELECT employee_name AS title, expiry_date, 'health_cert_expired' AS type, id
+    FROM health_certs
+    WHERE user_id = ? AND expiry_date != '' AND expiry_date < ?
+  `).all(userId, today)
+
+  // 已过期的健康证（personnel 表）
+  const expiredPersonHealths = db.prepare(`
+    SELECT name AS title, health_cert_expiry AS expiry_date, 'health_cert_expired' AS type, id
+    FROM personnel
+    WHERE user_id = ? AND health_cert_expiry != '' AND health_cert_expiry < ?
+  `).all(userId, today)
+
   // 虫害管理统计数据
   const pestSupplierDocs = db.prepare("SELECT expiry_date FROM pest_supplier_docs WHERE user_id = ? AND expiry_date != ''").all(userId)
   const pestSupplierStats = { total: pestSupplierDocs.length, valid: 0, expiring_soon: 0, expired: 0 }
@@ -1353,7 +1367,7 @@ app.get('/api/dashboard/stats', (req, res) => {
   ).all(userId, today, deadlineStr)
 
   // 合并并按到期时间升序排列
-  const warnings = [...warnCerts, ...warnHealths, ...warnPersonHealths, ...warnPestSupplier, ...warnPestStaffCerts, ...warnProductReports, ...warnTrainingCerts]
+  const warnings = [...warnCerts, ...warnHealths, ...warnPersonHealths, ...expiredHealths, ...expiredPersonHealths, ...warnPestSupplier, ...warnPestStaffCerts, ...warnProductReports, ...warnTrainingCerts]
     .sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))
     .map(item => ({
       ...item,

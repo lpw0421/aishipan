@@ -280,10 +280,12 @@
             </td>
             <td class="name-cell">{{ item.title }}</td>
             <td>{{ item.expiry_date }}</td>
-            <td :class="item.daysLeft <= 7 ? 'days-critical' : 'days-warning'">{{ item.daysLeft }}天</td>
+            <td :class="item.daysLeft < 0 ? 'days-expired' : item.daysLeft <= 7 ? 'days-critical' : 'days-warning'">
+              {{ item.daysLeft < 0 ? '已过期' + Math.abs(item.daysLeft) + '天' : item.daysLeft + '天' }}
+            </td>
             <td>
-              <span class="tag" :class="item.daysLeft <= 7 ? 'red' : 'orange'">
-                {{ item.daysLeft <= 7 ? '即将过期' : '30天内到期' }}
+              <span class="tag" :class="item.daysLeft < 0 ? 'red' : item.daysLeft <= 7 ? 'red' : 'orange'">
+                {{ item.daysLeft < 0 ? '已过期' : item.daysLeft <= 7 ? '即将过期' : '30天内到期' }}
               </span>
             </td>
             <td><span class="action-link" @click="goDetail(item)">去处理</span></td>
@@ -320,7 +322,7 @@ const greeting = computed(() => {
 })
 
 const systemStatus = computed(() => {
-  const urgent = warnings.value.filter(w => w.daysLeft <= 7).length
+  const urgent = warnings.value.filter(w => w.daysLeft <= 7 || w.daysLeft < 0).length
   if (urgent > 0) return { text: `${urgent} 项即将到期,请及时处理`, class: 'warn' }
   const total = warnings.value.length
   if (total > 0) return { text: `共 ${total} 项近期到期,请关注`, class: 'info' }
@@ -468,7 +470,7 @@ const switchHealthPeriod = (p) => { fetchHealthScore(p) }
 // ===== 类型标签映射 =====
 const getTypeLabel = (type) => {
   const map = {
-    certificate: '资质', health_cert: '健康证',
+    certificate: '资质', health_cert: '健康证', health_cert_expired: '健康证过期',
     pest_supplier_doc: '虫害供应商', pest_staff_cert: '虫害人员',
     product_report: '产品报告', training_cert: '培训证书'
   }
@@ -477,7 +479,7 @@ const getTypeLabel = (type) => {
 
 const getTypeTagClass = (type) => {
   const map = {
-    certificate: 'tag-blue', health_cert: 'tag-green',
+    certificate: 'tag-blue', health_cert: 'tag-green', health_cert_expired: 'tag-red',
     pest_supplier_doc: 'tag-amber', pest_staff_cert: 'tag-amber',
     product_report: 'tag-purple', training_cert: 'tag-slate'
   }
@@ -539,7 +541,7 @@ const goCalibrationRecord = () => router.push('/third-party/calibration')
 const goDetail = (item) => {
   const typeMap = {
     certificate: '/credentials',
-    health_cert: '/personnel/info',
+    health_cert: '/personnel/info', health_cert_expired: '/personnel/info',
     pest_supplier_doc: '/third-party/pest',
     pest_staff_cert: '/third-party/pest',
     product_report: '/raw-material/product-standards',
@@ -775,6 +777,7 @@ const goDetail = (item) => {
 .name-cell { font-weight: 500; }
 .days-critical { color: #ef4444; font-weight: 600; }
 .days-warning { color: #f59e0b; font-weight: 600; }
+.days-expired { color: #dc2626; font-weight: 700; }
 .action-link { color: #5b8def; cursor: pointer; font-size: 13px; }
 .action-link:hover { text-decoration: underline; }
 
