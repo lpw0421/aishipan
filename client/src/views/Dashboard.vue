@@ -383,7 +383,7 @@ const statCards = computed(() => [
     paths: ['M22 11.08V12a10 10 0 1 1-5.93-9.14'],
     polylines: ['22 4 12 14.01 9 11.01'],
     circles: [], lines: [], rects: [],
-    onClick: () => router.push('/personnel/health')
+    onClick: () => router.push('/personnel/info')
   },
   {
     label: '待处理客诉',
@@ -531,7 +531,7 @@ const scrollToWarnings = () => {
 const goMaterialInspection = () => router.push('/raw-material/product-standards')
 const goLabelAudit = () => router.push('/ai-audit/label')
 const goAddCredential = () => router.push('/credentials?action=add')
-const goAddHealthCert = () => router.push('/health-certs?action=add')
+const goAddHealthCert = () => router.push('/personnel/info')
 const goComplaint = () => router.push('/complaint/list')
 const goPestService = () => router.push('/third-party/pest')
 const goCalibrationRecord = () => router.push('/third-party/calibration')
@@ -539,7 +539,7 @@ const goCalibrationRecord = () => router.push('/third-party/calibration')
 const goDetail = (item) => {
   const typeMap = {
     certificate: '/credentials',
-    health_cert: '/health-certs',
+    health_cert: '/personnel/info',
     pest_supplier_doc: '/third-party/pest',
     pest_staff_cert: '/third-party/pest',
     product_report: '/raw-material/product-standards',
