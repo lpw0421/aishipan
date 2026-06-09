@@ -1611,6 +1611,7 @@ app.get('/api/dashboard/report', (req, res) => {
   })
 
   // health_certs 表（临期）
+  const urgentHealth = db.prepare(`SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ? AND expiry_date >= ? AND expiry_date <= date(?, '+${alertDays} days')`).all(userId, today, today)
   urgentHealth.forEach(h => {
     const remaining = Math.ceil((new Date(h.expiry_date) - now) / 86400000)
     alerts.push({ text: `${h.employee_name} 健康证 ${remaining}天内到期`, urgent: remaining <= 7 })
