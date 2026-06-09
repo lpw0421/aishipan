@@ -4873,7 +4873,7 @@ app.get('/api/personnel/export', (req, res) => {
   const keys = ['employee_number','name','department','position','phone','entry_date','health_cert_expiry','status','hc_number','remarks']
   const csv = '﻿' + headers.join(',') + '\n' + rows.map(r => keys.map(k => '"' + (r[k] || '').replace(/"/g, '""') + '"').join(',')).join('\n')
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', 'attachment; filename=人员信息_' + new Date().toISOString().slice(0,10) + '.csv')
+  res.setHeader('Content-Disposition', 'attachment; filename*=UTF-8\'\'%E4%BA%BA%E5%91%98%E4%BF%A1%E6%81%AF_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv')
   res.send(csv)
 })
 
