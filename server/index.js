@@ -4891,7 +4891,9 @@ app.put('/api/personnel/:id', (req, res) => {
 })
 
 app.delete('/api/personnel/:id', (req, res) => {
-  db.prepare('DELETE FROM personnel WHERE id = ? AND user_id = ?').run(req.params.id, req.body.user_id)
+  const user_id = getEffectiveUserId(req.body.user_id)
+  const result = db.prepare('DELETE FROM personnel WHERE id = ? AND user_id = ?').run(req.params.id, user_id)
+  if (result.changes === 0) return res.status(404).json({ message: '人员不存在或无权删除' })
   res.json({ message: '人员已删除' })
 })
 

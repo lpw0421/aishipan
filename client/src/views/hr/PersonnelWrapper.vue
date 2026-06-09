@@ -63,12 +63,10 @@
         <el-table-column prop="department" label="部门" min-width="70" show-overflow-tooltip />
         <el-table-column prop="position" label="职位" min-width="80" show-overflow-tooltip />
         <el-table-column label="状态" width="78"><template #default="{row}"><span class="tg" :class="'tg-'+row.statusCls">{{ row.status }}</span></template></el-table-column>
-        <el-table-column prop="hc_number" label="健康证号" min-width="110" show-overflow-tooltip />
         <el-table-column label="到期日期" width="110"><template #default="{row}"><span :class="'dt-'+row.hcStatus">{{ formatDate(row.health_cert_expiry) }}</span></template></el-table-column>
         <el-table-column label="证件" width="78"><template #default="{row}"><span class="tg" :class="'tg-'+row.hcCls">{{ row.hcLabel }}</span></template></el-table-column>
         <el-table-column label="操作" width="100" fixed="right"><template #default="{row}">
           <el-button link size="small" type="primary" @click="editRow(row)">编辑</el-button>
-          <el-button v-if="row.hcStatus==='临期'||row.hcStatus==='过期'" link size="small" type="warning" @click="renewHC(row)">续办</el-button>
           <el-button link size="small" type="danger" @click="deleteRow(row)">删除</el-button>
         </template></el-table-column>
       </el-table>
