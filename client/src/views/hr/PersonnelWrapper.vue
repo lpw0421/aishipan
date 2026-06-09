@@ -80,7 +80,7 @@
     <div class="bb" v-if="selectedRows.length>0">
       <span>已选 {{ selectedRows.length }} 项</span>
       <el-button size="small" class="bb-o" @click="batchExport">批量导出</el-button>
-      <el-button size="small" type="primary" @click="batchUpdateHC">批量更新健康证</el-button>
+      <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       <el-button size="small" class="btn-ghost" @click="tableRef?.clearSelection()">取消</el-button>
     </div>
 
@@ -173,7 +173,7 @@ const onExpand=(row,rows)=>{expandedRows.value=rows.map(r=>r.id)}
 const clearFilters=()=>{keyword.value='';filterStatus.value='全部';filterHealth.value='全部';filterDept.value='';activeCard.value='';fetchData()}
 const exportExcel=()=>ElMessage.info('导出功能开发中')
 const batchExport=()=>ElMessage.info(`已选${selectedRows.value.length}项，导出开发中`)
-const batchUpdateHC=()=>ElMessage.info(`已选${selectedRows.value.length}人，批量更新健康证开发中`)
+const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}
 const save=async()=>{if(!form.name)return ElMessage.warning('请填写姓名');saving.value=true;try{if(editingId.value)await axios.put(`/api/personnel/${editingId.value}`,{user_id:userId,...form});else await axios.post('/api/personnel',{user_id:userId,...form});ElMessage.success(editingId.value?'更新成功':'添加成功');showForm.value=false;resetForm();await fetchData()}catch(e){ElMessage.error(e.response?.data?.message||'操作失败')}finally{saving.value=false}}
 const aiFill=async()=>{if(!aiText.value.trim())return;aiLoading.value=true;try{const r=await axios.post('/api/ai/extract-person',{text:aiText.value});if(r.data.method==='ai'){const d=r.data;if(d.name)form.name=d.name;if(d.department)form.department=d.department;if(d.position)form.position=d.position;if(d.phone)form.phone=d.phone;if(d.health_cert_expiry)form.health_cert_expiry=d.health_cert_expiry;if(d.entry_date)form.entry_date=d.entry_date;aiText.value='';ElMessage.success('AI已填写，请核对')}}catch{ElMessage.error('AI异常')}finally{aiLoading.value=false}}

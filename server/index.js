@@ -4897,6 +4897,15 @@ app.delete('/api/personnel/:id', (req, res) => {
   res.json({ message: '人员已删除' })
 })
 
+app.post('/api/personnel/batch-delete', (req, res) => {
+  const user_id = getEffectiveUserId(req.body.user_id)
+  const { ids } = req.body
+  if (!ids || !ids.length) return res.status(400).json({ message: '请选择要删除的人员' })
+  const placeholders = ids.map(() => '?').join(',')
+  const result = db.prepare(`DELETE FROM personnel WHERE id IN (${placeholders}) AND user_id = ?`).run(...ids, user_id)
+  res.json({ message: `已删除 ${result.changes} 人`, count: result.changes })
+})
+
 // ---- 三方管理 ----
 
 // 创建 third_party 表（兼容旧数据库，db.js 迁移）
