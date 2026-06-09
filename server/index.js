@@ -116,12 +116,8 @@ const ALLOWED_TYPES = [
 const ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx']
 
 function fileFilter(req, file, cb) {
-  const ext = file.originalname.split('.').pop().toLowerCase()
-  if (ALLOWED_TYPES.includes(file.mimetype) || ALLOWED_EXTS.includes(ext)) {
-    cb(null, true)
-  } else {
-    cb(new Error('不支持的文件格式，仅允许 jpg/png/gif/pdf/doc/docx'))
-  }
+  // 接受所有文件格式
+  cb(null, true)
 }
 
 const upload = multer({
@@ -4845,6 +4841,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS personnel (
   health_cert_expiry TEXT DEFAULT '', status TEXT DEFAULT '在职',
   remarks TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME,
   FOREIGN KEY (user_id) REFERENCES users(id))`)
+try { db.exec('ALTER TABLE personnel ADD COLUMN hc_number TEXT DEFAULT \'\'') } catch {}
+try { db.exec('ALTER TABLE personnel ADD COLUMN file_path TEXT DEFAULT \'\'') } catch {}
 
 app.get('/api/personnel', (req, res) => {
   let { user_id, keyword, department, status } = req.query
@@ -4886,14 +4884,14 @@ app.get('/api/personnel/stats', (req, res) => {
 })
 
 app.post('/api/personnel', (req, res) => {
-  const { user_id: rawId, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks } = req.body
+  const { user_id: rawId, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks, file_path } = req.body
   const user_id = getEffectiveUserId(rawId)
   if (!name) return res.status(400).json({ message: '请填写姓名' })
   const count = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
   const employee_number = 'RY-' + String(count + 1).padStart(3, '0')
   db.prepare(
-    'INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks) VALUES (?,?,?,?,?,?,?,?,?,?)'
-  ).run(user_id, employee_number, name, department || '', position || '', phone || '', entry_date || '', health_cert_expiry || '', hc_number || '', remarks || '')
+    'INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, health_cert_expiry, hc_number, remarks, file_path) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+  ).run(user_id, employee_number, name, department || '', position || '', phone || '', entry_date || '', health_cert_expiry || '', hc_number || '', remarks || '', file_path || '')
   res.json({ message: '人员添加成功' })
 })
 
@@ -4901,10 +4899,10 @@ app.put('/api/personnel/:id', (req, res) => {
   const { id } = req.params
   const existing = db.prepare('SELECT * FROM personnel WHERE id = ? AND user_id = ?').get(id, req.body.user_id)
   if (!existing) return res.status(404).json({ message: '人员不存在' })
-  const { name, department, position, phone, entry_date, status, health_cert_expiry, training_hours, remarks } = req.body
+  const { name, department, position, phone, entry_date, status, health_cert_expiry, training_hours, remarks, file_path } = req.body
   db.prepare(
-    'UPDATE personnel SET name=?, department=?, position=?, phone=?, entry_date=?, status=?, health_cert_expiry=?, training_hours=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
-  ).run(name || existing.name, department || existing.department, position || existing.position, phone || existing.phone, entry_date || existing.entry_date, status || existing.status, health_cert_expiry || existing.health_cert_expiry, training_hours ?? existing.training_hours, remarks || existing.remarks, id)
+    'UPDATE personnel SET name=?, department=?, position=?, phone=?, entry_date=?, status=?, health_cert_expiry=?, training_hours=?, remarks=?, file_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
+  ).run(name || existing.name, department || existing.department, position || existing.position, phone || existing.phone, entry_date || existing.entry_date, status || existing.status, health_cert_expiry || existing.health_cert_expiry, training_hours ?? existing.training_hours, remarks || existing.remarks, file_path !== undefined ? file_path : (existing.file_path || ''), id)
   res.json({ message: '人员更新成功' })
 })
 
@@ -4917,7 +4915,7 @@ app.delete('/api/personnel/:id', (req, res) => {
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: '请选择文件' })
-  res.json({ filename: req.file.filename, message: '上传成功' })
+  res.json({ filename: '/uploads/' + req.file.filename, message: '上传成功' })
 })
 
 app.post('/api/personnel/batch-delete', (req, res) => {
