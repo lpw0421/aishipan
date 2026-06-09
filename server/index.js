@@ -5200,23 +5200,66 @@ app.post('/api/chat', async (req, res) => {
   const aiKey = process.env.AI_API_KEY
   if (!aiKey) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 AI_API_KEY。' })
 
+  const userId = getEffectiveUserId(req.body.user_id)
+
+  // ---- 智能数据查询：如果用户提到员工姓名，自动拉取相关数据 ----
+  let dataContext = ''
+  if (userId) {
+    try {
+      const personnelList = db.prepare('SELECT id, name, department, position FROM personnel WHERE user_id = ?').all(userId)
+      const names = personnelList.map(p => p.name)
+
+      // 检查消息中是否提到任一员工姓名
+      const mentionedNames = names.filter(n => n && n.length >= 2 && message.includes(n))
+
+      if (mentionedNames.length > 0) {
+        const contextParts = []
+        for (const name of mentionedNames) {
+          const person = personnelList.find(p => p.name === name)
+          if (!person) continue
+
+          // 健康证信息
+          const hc = db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
+          const personHC = db.prepare('SELECT health_cert_expiry FROM personnel WHERE id = ?').get(person.id)
+          const expiryDate = hc?.expiry_date || personHC?.health_cert_expiry || ''
+
+          let hcStatus = '无记录'
+          if (expiryDate) {
+            const days = Math.ceil((new Date(expiryDate) - new Date()) / 86400000)
+            hcStatus = days < 0 ? `已过期${Math.abs(days)}天` : days <= 30 ? `${days}天后到期（临期）` : `有效（${days}天后到期）`
+          }
+
+          // 培训记录
+          const trainings = db.prepare("SELECT course_name, training_date, exam_score FROM training_records WHERE user_id = ? AND employee_name = ? ORDER BY training_date DESC LIMIT 10").all(userId, name)
+          const trainSummary = trainings.length > 0
+            ? trainings.map(t => `${t.training_date} ${t.course_name} ${t.exam_score ? `得分${t.exam_score}` : ''}`).join('；')
+            : '无培训记录'
+
+          contextParts.push(`【${name}】部门：${person.department || '未填'} | 职位：${person.position || '未填'} | 健康证：${expiryDate}（${hcStatus}）| 培训：${trainSummary}`)
+        }
+        dataContext = '\n\n以下是从数据库查询到的实际数据，请基于这些数据回答用户问题：\n' + contextParts.join('\n')
+      }
+    } catch (e) { /* 查询失败不影响对话 */ }
+  }
+
   const systemPrompt = `你是"AI食安"系统的智能助手，专门为食品生产企业的质量管理人员提供帮助。
 
 系统包含以下模块：
 - 原料库与验收标准：管理原料信息、配置验收标准（证件/感官/温度）
 - 资质管理：自有资质、供应商资质、产品报告跟踪和临期预警
 - 健康证管理：员工健康证到期提醒
+- 人员综合管理：员工信息、健康证状态统一管理
+- 培训考核：培训计划、课程、记录、考核
 - AI标签审核：上传标签图片自动审核合规性
 - 客诉管理：客诉看板、处理流程、满意度追踪
-- 体系文件：ISO 22000 / FSSC 22000 体系文件管理（管理手册、程序文件、SOP、记录表单）
+- 体系文件：ISO 22000 / FSSC 22000 体系文件管理
 - 虫害管理：供应商、人员、化学品、服务记录
-- 培训考核：培训计划、课程、记录、考核
-- 计量校准：设备台账、校准计划、记录
+- 计量校准：设备台账、校准计划、记录${dataContext}
 
 回答要求：
 1. 用中文回答，简洁专业
-2. 涉及食品安全问题时，引用相关GB标准
-3. 如果问题超出系统范围，建议联系食品安全顾问
+2. 如果上下文提供了员工数据，直接引用具体日期和状态回答
+3. 涉及食品安全问题时，引用相关GB标准
 4. 回答控制在300字以内`
 
   try {

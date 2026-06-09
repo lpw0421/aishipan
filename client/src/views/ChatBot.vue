@@ -93,7 +93,8 @@ async function sendMessage(text) {
 
   try {
     const history = messages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-    const { data } = await axios.post('/api/chat', { message: content, history })
+    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    const { data } = await axios.post('/api/chat', { message: content, history, user_id: user.id })
     messages.value.push({ role: 'assistant', content: data.reply })
   } catch {
     messages.value.push({ role: 'assistant', content: 'AI 服务暂时不可用，请稍后再试。' })
