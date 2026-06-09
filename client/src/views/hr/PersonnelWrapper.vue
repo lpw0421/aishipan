@@ -66,6 +66,7 @@
         <el-table-column label="状态" width="78"><template #default="{row}"><span class="tg" :class="'tg-'+row.statusCls">{{ row.status }}</span></template></el-table-column>
         <el-table-column label="到期日期" width="110"><template #default="{row}"><span :class="'dt-'+row.hcStatus">{{ formatDate(row.health_cert_expiry) }}</span></template></el-table-column>
         <el-table-column label="证件" width="78"><template #default="{row}"><span class="tg" :class="'tg-'+row.hcCls">{{ row.hcLabel }}</span></template></el-table-column>
+        <el-table-column label="附件" width="60"><template #default="{row}"><a v-if="row.file_path" :href="'/uploads/'+row.file_path" target="_blank" title="查看附件">📎</a><span v-else style="color:#ccc">—</span></template></el-table-column>
         <el-table-column label="操作" width="100" fixed="right"><template #default="{row}">
           <el-button link size="small" type="primary" @click="editRow(row)">编辑</el-button>
           <el-button link size="small" type="danger" @click="deleteRow(row)">删除</el-button>
@@ -113,9 +114,8 @@
           <el-col :span="12"><el-form-item label="入职日期"><el-date-picker v-model="form.entry_date" type="date" style="width:100%" value-format="YYYY-MM-DD" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="健康证到期"><el-date-picker v-model="form.health_cert_expiry" type="date" style="width:100%" value-format="YYYY-MM-DD" /></el-form-item></el-col>
         </el-row>
-        <el-form-item label="健康证号"><el-input v-model="form.hc_number" placeholder="选填" /></el-form-item>
-        <el-form-item label="附件">
-          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" :on-change="onFileChange" :on-remove="onFileRemove" accept="image/*,.pdf">
+        <el-form-item label="资质附件">
+          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" :on-change="onFileChange" :on-remove="onFileRemove">
             <el-button size="small">选择文件</el-button>
             <span class="upload-tip">支持图片/PDF</span>
           </el-upload>
