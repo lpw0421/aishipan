@@ -171,8 +171,8 @@ const deleteRow=async r=>{await ElMessageBox.confirm(`确定删除 ${r.name} 的
 const onSelectionChange=rows=>{selectedRows.value=rows}
 const onExpand=(row,rows)=>{expandedRows.value=rows.map(r=>r.id)}
 const clearFilters=()=>{keyword.value='';filterStatus.value='全部';filterHealth.value='全部';filterDept.value='';activeCard.value='';fetchData()}
-const exportExcel=()=>ElMessage.info('导出功能开发中')
-const batchExport=()=>ElMessage.info(`已选${selectedRows.value.length}项，导出开发中`)
+const exportExcel=()=>{window.open('/api/personnel/export?user_id='+userId)}
+const batchExport=()=>{const ids=selectedRows.value.map(r=>r.id).join(',');window.open('/api/personnel/export?user_id='+userId+'&ids='+ids)}
 const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}
 const save=async()=>{if(!form.name)return ElMessage.warning('请填写姓名');saving.value=true;try{if(editingId.value)await axios.put(`/api/personnel/${editingId.value}`,{user_id:userId,...form});else await axios.post('/api/personnel',{user_id:userId,...form});ElMessage.success(editingId.value?'更新成功':'添加成功');showForm.value=false;resetForm();await fetchData()}catch(e){ElMessage.error(e.response?.data?.message||'操作失败')}finally{saving.value=false}}

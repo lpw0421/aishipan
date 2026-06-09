@@ -4859,6 +4859,24 @@ app.get('/api/personnel', (req, res) => {
   res.json({ list })
 })
 
+app.get('/api/personnel/export', (req, res) => {
+  const user_id = getEffectiveUserId(req.query.user_id)
+  let rows
+  if (req.query.ids) {
+    const ids = req.query.ids.split(',').map(Number)
+    const ph = ids.map(() => '?').join(',')
+    rows = db.prepare(`SELECT * FROM personnel WHERE user_id = ? AND id IN (${ph})`).all(user_id, ...ids)
+  } else {
+    rows = db.prepare('SELECT * FROM personnel WHERE user_id = ? ORDER BY created_at DESC').all(user_id)
+  }
+  const headers = ['编号','姓名','部门','职位','电话','入职日期','健康证到期','状态','健康证号','备注']
+  const keys = ['employee_number','name','department','position','phone','entry_date','health_cert_expiry','status','hc_number','remarks']
+  const csv = '﻿' + headers.join(',') + '\n' + rows.map(r => keys.map(k => '"' + (r[k] || '').replace(/"/g, '""') + '"').join(',')).join('\n')
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename=人员信息_' + new Date().toISOString().slice(0,10) + '.csv')
+  res.send(csv)
+})
+
 app.get('/api/personnel/stats', (req, res) => {
   const { user_id } = req.query
   const total = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(user_id).cnt
