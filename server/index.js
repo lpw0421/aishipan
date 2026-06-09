@@ -5232,9 +5232,9 @@ app.post('/api/chat', async (req, res) => {
           const hcFuzzy = !hc ? db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name LIKE ?').get(userId, `%${name}%`) : null
           const hcData = hc || hcFuzzy
 
-          let expiryDate = ''
-          if (personFuzzy?.health_cert_expiry) expiryDate = personFuzzy.health_cert_expiry
-          if (!expiryDate && hcData?.expiry_date) expiryDate = hcData.expiry_date
+          // 健康证到期日优先取 health_certs（精确匹配），其次 personnel
+          let expiryDate = hcData?.expiry_date || ''
+          if (!expiryDate && personFuzzy?.health_cert_expiry) expiryDate = personFuzzy.health_cert_expiry
           if (!expiryDate) expiryDate = person?.health_cert_expiry || ''
 
           let hcStatus = '无记录'
