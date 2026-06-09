@@ -5262,6 +5262,27 @@ app.post('/api/chat', async (req, res) => {
     } catch (e) { /* 查询失败不影响对话 */ }
   }
 
+  // 如果匹配到了员工数据，直接格式化返回，不经过AI（避免编造）
+  if (dataContext) {
+    const parts = dataContext.split('\n').filter(l => l.startsWith('【'))
+    const resultLines = []
+    for (const line of parts) {
+      const nameMatch = line.match(/【(.+?)】/)
+      const name = nameMatch ? nameMatch[1] : ''
+      const expiryMatch = line.match(/健康证到期：(.+?)（(.+?)）/)
+      const deptMatch = line.match(/部门：(.+?) \|/)
+      const trainMatch = line.match(/培训：(.+)$/)
+
+      let reply = `📋 **${name}**\n`
+      if (deptMatch) reply += `• 部门/职位：${deptMatch[1]}\n`
+      if (expiryMatch) reply += `• 健康证到期：${expiryMatch[1]}\n• 状态：${expiryMatch[2]}\n`
+      if (trainMatch && trainMatch[1] !== '无培训记录') reply += `• 培训记录：${trainMatch[1]}\n`
+      reply += `\n💡 详情请查看「人员综合管理」页面。`
+      resultLines.push(reply)
+    }
+    return res.json({ reply: resultLines.join('\n\n') })
+  }
+
   const systemPrompt = `你是"AI食安"系统的智能助手，专门为食品生产企业的质量管理人员提供帮助。
 
 系统包含以下模块：
@@ -5274,12 +5295,12 @@ app.post('/api/chat', async (req, res) => {
 - 客诉管理：客诉看板、处理流程、满意度追踪
 - 体系文件：ISO 22000 / FSSC 22000 体系文件管理
 - 虫害管理：供应商、人员、化学品、服务记录
-- 计量校准：设备台账、校准计划、记录${dataContext}
+- 计量校准：设备台账、校准计划、记录
 
 回答要求：
 1. 用中文回答，简洁专业
-2. 如果上下文提供了员工数据，直接引用具体日期和状态回答
-3. 涉及食品安全问题时，引用相关GB标准
+2. 涉及食品安全问题时，引用相关GB标准
+3. 如果问题超出系统范围，建议联系食品安全顾问
 4. 回答控制在300字以内`
 
   try {
