@@ -11,7 +11,7 @@
       <div class="mf-item"><label>电话</label><input v-model="form.phone" type="tel" placeholder="手机号" /></div>
       <div class="mf-item"><label>入职日期</label><input v-model="form.entry_date" type="date" /></div>
       <div class="mf-item"><label>健康证到期</label><input v-model="form.health_cert_expiry" type="date" /></div>
-      <div class="mf-item"><label>资质附件</label><input type="file" accept="image/*,.pdf" capture="environment" @change="onFileChange" style="padding:8px" /></div>
+      <div class="mf-item"><label>资质附件</label><input type="file" accept="image/*,.pdf" @change="onFileChange" style="padding:8px" /></div>
       <div v-if="uploading" style="font-size:12px;color:#378ADD;margin-bottom:10px">上传中...</div>
       <div class="mf-item"><label>状态</label>
         <select v-model="form.status"><option value="在职">在职</option><option value="试用期">试用期</option><option value="离职">离职</option></select>
