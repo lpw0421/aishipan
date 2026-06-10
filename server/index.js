@@ -1923,100 +1923,65 @@ app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
   }
 })
 
-// 健康证真伪验证（AI提取 + 内外部比对）
+// 健康证真伪验证（QR扫描 + 联网查询）
 app.post('/api/health-certs/verify', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: '请上传健康证图片' })
-    const userId = getEffectiveUserId(req.body.user_id)
-    if (!userId) return res.status(400).json({ message: '缺少用户标识' })
 
-    const aiKey = process.env.AI_API_KEY
-    if (!aiKey) return res.json({ verified: false, message: 'AI 服务未配置，无法进行图片识别' })
-
-    // 读图片转 base64
     const fs = require('fs')
-    const imgBase64 = fs.readFileSync(req.file.path).toString('base64')
+    const imgBuffer = fs.readFileSync(req.file.path)
     fs.unlinkSync(req.file.path)
 
-    // AI 提取健康证信息
-    const extractPrompt = `你是一个健康证信息提取工具。请从这张健康证图片中提取以下信息，以JSON格式返回（只返回JSON，不要其他文字）：
-{
-  "name": "姓名",
-  "id_number": "身份证号",
-  "cert_number": "健康证编号",
-  "issue_date": "发证日期(YYYY-MM-DD)",
-  "expiry_date": "有效期至(YYYY-MM-DD)",
-  "issuing_authority": "发证机构",
-  "job_category": "从业类别",
-  "has_seal": true/false,
-  "has_qr": true/false,
-  "confidence": "高/中/低"
-}
-如果某个字段无法识别，设为空字符串。`
-
-    const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: extractPrompt },
-          { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imgBase64}` } }] }
-        ],
-        max_tokens: 500, temperature: 0.1
-      })
-    })
-    const aiData = await aiRes.json()
-    const rawJson = aiData.choices?.[0]?.message?.content || '{}'
-    // 清理可能包裹的 markdown 代码块
-    const jsonStr = rawJson.replace(/```json\n?|```/g, '').trim()
-    let certInfo
+    // 1. 扫描二维码
+    let qrResult = null
     try {
-      certInfo = JSON.parse(jsonStr)
-    } catch {
-      certInfo = { error: 'AI 识别失败', raw: rawJson.slice(0, 200) }
-    }
+      const { Jimp } = require('jimp')
+      const jsQR = require('jsqr')
+      const image = await Jimp.read(imgBuffer)
+      const { data, width, height } = image.bitmap
+      const qrCode = jsQR(new Uint8ClampedArray(data), width, height)
+      if (qrCode && qrCode.data) {
+        qrResult = { data: qrCode.data, isUrl: qrCode.data.startsWith('http') }
+        if (qrResult.isUrl) {
+          try {
+            const qrRes = await fetch(qrResult.data, { signal: AbortSignal.timeout(10000) })
+            qrResult.status = qrRes.ok ? `可访问(HTTP ${qrRes.status})` : `不可访问(${qrRes.status})`
+            if (qrRes.ok) {
+              const body = await qrRes.text()
+              qrResult.preview = body.slice(0, 500)
+            }
+          } catch { qrResult.status = '无法连接' }
+        }
+      }
+    } catch(e) { /* QR识别失败不阻塞 */ }
 
-    if (certInfo.error) return res.json({ verified: false, ...certInfo })
-
-    // 尝试外部查询
-    let externalCheck = { attempted: false, result: null }
-    const certNumber = certInfo.cert_number || ''
-    const authority = certInfo.issuing_authority || ''
-
-    // 各城市疾控中心验证 URL
-    const verifyUrls = []
-    if (authority.includes('北京')) verifyUrls.push(`https://www.bjcdc.org/health-cert/verify?code=${encodeURIComponent(certNumber)}`)
-    if (authority.includes('上海')) verifyUrls.push(`https://wsjkw.sh.gov.cn/health-cert/check?no=${encodeURIComponent(certNumber)}`)
-    if (authority.includes('广州') || authority.includes('广东')) verifyUrls.push(`https://wsjkw.gd.gov.cn/health-cert/query?certNo=${encodeURIComponent(certNumber)}`)
-    if (authority.includes('深圳')) verifyUrls.push(`https://wjw.sz.gov.cn/health-cert/search?code=${encodeURIComponent(certNumber)}`)
-
-    if (verifyUrls.length > 0 && certNumber) {
+    // 2. 根据QR结果做联网验证
+    let externalCheck = { attempted: false, result: null, data: null }
+    if (qrResult && qrResult.data) {
       externalCheck.attempted = true
-      try {
-        const checkRes = await fetch(verifyUrls[0], { signal: AbortSignal.timeout(8000) })
-        externalCheck.result = checkRes.ok ? '接口可达（需人工确认结果）' : `接口返回 ${checkRes.status}`
-      } catch {
-        externalCheck.result = '接口不可达'
+      // 尝试从QR内容中提取证书编号并发起查询
+      const certMatch = qrResult.data.match(/[A-Z]{2,}[\d-]{8,}/) || qrResult.data.match(/No[.=]([A-Za-z0-9]+)/)
+      if (certMatch) {
+        const certNo = certMatch[1] || certMatch[0]
+        externalCheck.certNumber = certNo
+        // 尝试访问中国疾控中心验证平台
+        try {
+          const checkRes = await fetch(`https://www.cdctj.com.cn/health-cert/check?code=${encodeURIComponent(certNo)}`, { signal: AbortSignal.timeout(8000) })
+          externalCheck.result = checkRes.ok ? '验证平台可访问' : `返回${checkRes.status}`
+        } catch { externalCheck.result = '验证平台不可达' }
+      } else {
+        externalCheck.result = qrResult.isUrl ? '二维码为官网链接，请点击查看' : '二维码内容：' + qrResult.data.slice(0, 100)
       }
     }
 
-    // 真伪判定
-    const issues = []
-    if (certInfo.confidence === '低') issues.push('图片模糊，建议重新上传')
-    if (!certInfo.has_seal) issues.push('缺少印章')
-    if (!certInfo.cert_number) issues.push('无证书编号')
-    if (!certInfo.issuing_authority) issues.push('无发证机构')
-
     res.json({
-      verified: issues.length === 0,
-      verdict: issues.length === 0 ? '证书格式正常' : `${issues.length} 个疑点`,
-      certInfo,
-      issues,
+      verified: !!qrResult,
+      verdict: qrResult ? (qrResult.isUrl && qrResult.status?.includes('可访问') ? 'QR验证通过，可联网查询' : '已识别二维码') : '未检测到二维码',
+      qrCode: qrResult,
       externalCheck,
-      suggestion: issues.length === 0
-        ? 'AI 识别通过，建议通过官方渠道进一步核实'
-        : issues.join('；')
+      suggestion: qrResult
+        ? (qrResult.isUrl ? '点击二维码链接查看官方验证结果' : '二维码内容非URL，建议手动核实')
+        : '未检测到二维码，建议拍摄清晰完整的健康证照片（含二维码区域）'
     })
   } catch (e) {
     res.status(500).json({ message: '验证失败：' + e.message })

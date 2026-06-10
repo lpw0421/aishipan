@@ -146,17 +146,18 @@
       </el-upload>
       <div v-if="verifyResult" style="margin-top:16px">
         <el-alert :type="verifyResult.verified?'success':'warning'" :title="verifyResult.verdict" :closable="false" style="margin-bottom:12px" />
-        <div v-if="verifyResult.certInfo && !verifyResult.certInfo.error" class="verify-info">
-          <div class="vi-row"><span>姓名</span><b>{{ verifyResult.certInfo.name || '—' }}</b></div>
-          <div class="vi-row"><span>身份证号</span><b>{{ verifyResult.certInfo.id_number || '—' }}</b></div>
-          <div class="vi-row"><span>健康证编号</span><b>{{ verifyResult.certInfo.cert_number || '—' }}</b></div>
-          <div class="vi-row"><span>发证日期</span><b>{{ verifyResult.certInfo.issue_date || '—' }}</b></div>
-          <div class="vi-row"><span>有效期至</span><b>{{ verifyResult.certInfo.expiry_date || '—' }}</b></div>
-          <div class="vi-row"><span>发证机构</span><b>{{ verifyResult.certInfo.issuing_authority || '—' }}</b></div>
-          <div class="vi-row"><span>AI 可信度</span><b>{{ verifyResult.certInfo.confidence || '—' }}</b></div>
-        </div>
-        <div v-if="verifyResult.issues && verifyResult.issues.length" style="margin-top:10px">
-          <div v-for="(iss, i) in verifyResult.issues" :key="i" style="font-size:13px;color:#A32D2D">⚠️ {{ iss }}</div>
+        <div v-if="verifyResult.qrCode" class="verify-info">
+          <div class="vi-row"><span>二维码内容</span><b style="word-break:break-all;font-size:12px">{{ verifyResult.qrCode.data }}</b></div>
+          <div class="vi-row" v-if="verifyResult.qrCode.isUrl"><span>联网状态</span><b>{{ verifyResult.qrCode.status || '检测中' }}</b></div>
+          <div v-if="verifyResult.qrCode.isUrl" style="margin-top:10px;display:flex;gap:8px">
+            <a :href="verifyResult.qrCode.data" target="_blank" style="flex:1">
+              <el-button type="primary" size="small" style="width:100%">🌐 一键打开官方验证页面</el-button>
+            </a>
+            <el-button size="small" class="btn-ghost" @click="copyToClipboard(verifyResult.qrCode.data)">📋 复制链接</el-button>
+          </div>
+          <div v-if="verifyResult.qrCode.preview" style="margin-top:8px;padding:8px;background:#fff;border-radius:4px;font-size:12px;max-height:150px;overflow:auto">
+            {{ verifyResult.qrCode.preview }}
+          </div>
         </div>
         <div v-if="verifyResult.externalCheck && verifyResult.externalCheck.attempted" style="margin-top:10px;font-size:12px;color:#888">
           🌐 外部查询：{{ verifyResult.externalCheck.result }}
@@ -227,6 +228,7 @@ const exportExcel=()=>{window.open('/api/personnel/export?user_id='+userId)}
 const importHealthCerts=(file)=>{const fd=new FormData();fd.append('file',file.raw);fd.append('user_id',userId);axios.post('/api/health-certs/import',fd).then(r=>{ElMessage.success(r.data.message);fetchData()}).catch(e=>{ElMessage.error(e.response?.data?.message||'导入失败')})}
 const downloadTemplate=()=>{window.open('/api/health-certs/template')}
 const doVerify=(file)=>{const fd=new FormData();fd.append('file',file.raw);fd.append('user_id',userId);verifying.value=true;verifyResult.value=null;axios.post('/api/health-certs/verify',fd).then(r=>{verifyResult.value=r.data}).catch(e=>{verifyResult.value={verified:false,verdict:'验证失败',suggestion:e.response?.data?.message||'网络错误'}}).finally(()=>{verifying.value=false})}
+const copyToClipboard=(text)=>{navigator.clipboard.writeText(text).then(()=>{ElMessage.success('已复制到剪贴板')}).catch(()=>{ElMessage.error('复制失败')})}
 const batchExport=()=>{const ids=selectedRows.value.map(r=>r.id).join(',');window.open('/api/personnel/export?user_id='+userId+'&ids='+ids)}
 const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}
