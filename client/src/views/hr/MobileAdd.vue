@@ -11,6 +11,8 @@
       <div class="mf-item"><label>电话</label><input v-model="form.phone" type="tel" placeholder="手机号" /></div>
       <div class="mf-item"><label>入职日期</label><input v-model="form.entry_date" type="date" /></div>
       <div class="mf-item"><label>健康证到期</label><input v-model="form.health_cert_expiry" type="date" /></div>
+      <div class="mf-item"><label>资质附件</label><input type="file" accept="image/*,.pdf" capture="environment" @change="onFileChange" style="padding:8px" /></div>
+      <div v-if="uploading" style="font-size:12px;color:#378ADD;margin-bottom:10px">上传中...</div>
       <div class="mf-item"><label>状态</label>
         <select v-model="form.status"><option value="在职">在职</option><option value="试用期">试用期</option><option value="离职">离职</option></select>
       </div>
@@ -30,30 +32,41 @@ import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
 
 const form = reactive({ name: '', department: '', position: '', phone: '', entry_date: '', health_cert_expiry: '', status: '在职' })
-const saving = ref(false), submitted = ref(false)
-const userId = ref('')
+const saving = ref(false), submitted = ref(false), uploading = ref(false)
+const userId = ref(''), uploadFile = ref(null)
 
 onMounted(() => {
   const params = new URLSearchParams(window.location.search)
   userId.value = params.get('user_id') || ''
 })
 
+const onFileChange = (e) => { uploadFile.value = e.target.files[0] }
+
 const submit = async () => {
   if (!form.name) return
   saving.value = true
   try {
+    // 先上传附件
+    if (uploadFile.value) {
+      uploading.value = true
+      const fd = new FormData()
+      fd.append('file', uploadFile.value)
+      const upRes = await axios.post('/api/upload', fd)
+      form.file_path = upRes.data.filename
+      uploading.value = false
+    }
     await axios.post('/api/personnel', { ...form, user_id: userId.value })
     submitted.value = true
   } catch (e) {
     alert(e.response?.data?.message || '提交失败')
   } finally {
-    saving.value = false
+    saving.value = false; uploading.value = false
   }
 }
 
 const addAnother = () => {
-  Object.assign(form, { name: '', department: '', position: '', phone: '', entry_date: '', health_cert_expiry: '', status: '在职' })
-  submitted.value = false
+  Object.assign(form, { name: '', department: '', position: '', phone: '', entry_date: '', health_cert_expiry: '', status: '', file_path: '' })
+  uploadFile.value = null; submitted.value = false
 }
 </script>
 
