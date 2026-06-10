@@ -1825,6 +1825,20 @@ app.get('/api/health-certs/export', (req, res) => {
   res.send(buf)
 })
 
+// 下载健康证导入模板
+app.get('/api/health-certs/template', (req, res) => {
+  const ws = XLSX.utils.json_to_sheet([
+    { '员工姓名': '张三', '部门': '后厨部', '到期日期': '2027-06-30', '发证日期': '2026-06-01', '备注': '示例' }
+  ])
+  ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 20 }]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '健康证导入模板')
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('健康证导入模板.xlsx'))
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.send(buf)
+})
+
 // 一键导入健康证（Excel）
 app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
   try {
@@ -1839,27 +1853,35 @@ app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
 
     if (rows.length === 0) return res.status(400).json({ message: 'Excel 文件为空' })
 
+    // 校验列名：必须包含"员工姓名"和"到期日期"
+    const headers = Object.keys(rows[0])
+    const hasName = headers.some(h => h.includes('姓名') || h === 'name')
+    const hasExpiry = headers.some(h => h.includes('到期') && h.includes('日期') || h === 'expiry_date')
+    if (!hasName || !hasExpiry) {
+      return res.status(400).json({ message: 'Excel 格式不正确，必须包含"员工姓名"和"到期日期"列。请先下载模板。' })
+    }
+
     let imported = 0, updated = 0, skipped = 0
+    // 统一列名：按模板标准
     const errors = []
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
+      // 兼容多种列名写法
       const name = (row['员工姓名'] || row['姓名'] || row['name'] || '').toString().trim()
-      const expiry = (row['到期日期'] || row['expiry_date'] || '').toString().trim()
       const dept = (row['部门'] || row['department'] || '').toString().trim()
       const issueDate = (row['发证日期'] || row['issue_date'] || '').toString().trim()
+      let expiry = row['到期日期'] || row['expiry_date'] || ''
 
-      if (!name || !expiry) {
-        errors.push(`第${i + 2}行: 姓名或到期日期为空，跳过`)
-        skipped++
-        continue
-      }
+      if (!name) { errors.push(`第${i + 2}行: 姓名为空，跳过`); skipped++; continue }
+      if (!expiry) { errors.push(`${name}: 到期日期为空，跳过`); skipped++; continue }
 
-      // 处理日期格式（Excel 可能是数字格式）
+      // 处理日期格式（Excel 可能是序列号）
       let expiryStr = expiry
-      if (typeof row['到期日期'] === 'number' || typeof row['expiry_date'] === 'number') {
-        const d = new Date((row['到期日期'] || row['expiry_date'] || 25569) * 86400000 + Date.UTC(1970, 0, 1) - 86400000 * 25569)
-        expiryStr = d.toISOString().slice(0, 10)
+      if (typeof expiry === 'number') {
+        expiryStr = new Date((expiry - 25569) * 86400000).toISOString().slice(0, 10)
+      } else {
+        expiryStr = String(expiry).trim()
       }
 
       // 查找或创建 health_cert 记录
