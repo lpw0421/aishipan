@@ -2,9 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 路由配置（组件懒加载：仅访问时才加载对应 JS）
 const routes = [
-  // 登录/注册（无需 Layout 包裹）
+  // 登录/注册/手机录入（无需 Layout 包裹）
   { path: '/login', component: () => import('../views/Login.vue') },
   { path: '/register', component: () => import('../views/Register.vue') },
+  { path: '/personnel/mobile-add', component: () => import('../views/hr/MobileAdd.vue') },
   { path: '/settings', component: () => import('../views/Settings.vue') },
 
   // 后台管理（MainLayout 统一包裹，子页面渲染到 <router-view>）
@@ -145,7 +146,6 @@ const routes = [
         children: [
           { path: '', redirect: '/personnel/info' },
           { path: 'info', component: () => import('../views/hr/PersonnelWrapper.vue') },
-          { path: 'mobile-add', component: () => import('../views/hr/MobileAdd.vue') },
           { path: 'list', redirect: '/personnel/info' },
           { path: 'health-certs', redirect: '/personnel/info' }
         ]

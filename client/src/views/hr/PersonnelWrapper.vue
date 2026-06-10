@@ -194,7 +194,7 @@ const pagedList=computed(()=>{const s=(currentPage.value-1)*pageSize.value;retur
 const aiText=ref(''), aiLoading=ref(false), tableRef=ref(null)
 const showVerify=ref(false), verifyResult=ref(null), verifying=ref(false)
 const showQR=ref(false)
-const mobileUrl=computed(()=>`${window.location.origin}/#/personnel/mobile-add?user_id=${userId}`)
+const mobileUrl=computed(()=>`${window.location.origin}/personnel/mobile-add?user_id=${userId}`)
 const qrCodeUrl=computed(()=>`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(mobileUrl.value)}`)
 
 const stats = reactive({ total:0, active:0, expiringSoon:0, expired:0, hcNormal:0 })
