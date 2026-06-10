@@ -145,6 +145,7 @@ const routes = [
         redirect: '/personnel/info',
         children: [
           { path: 'info', component: () => import('../views/hr/PersonnelWrapper.vue') },
+          { path: 'mobile-add', component: () => import('../views/hr/MobileAdd.vue') },
           { path: 'list', redirect: '/personnel/info' },
           { path: 'health-certs', redirect: '/personnel/info' }
         ]

@@ -13,7 +13,8 @@
           <el-button class="btn-ghost" size="small">📥 导入员工</el-button>
         </el-upload>
         <el-button class="btn-ghost" size="small" @click="downloadTemplate">📋 下载模板</el-button>
-        <el-button class="btn-verify" size="small" @click="showVerify=true" style="">🔍 真伪验证</el-button>
+        <el-button class="btn-verify" size="small" @click="showVerify=true">🔍 真伪验证</el-button>
+        <el-button class="btn-ghost" size="small" @click="showQR=true">📱 手机录入</el-button>
         <el-button type="primary" size="small" class="btn-main" @click="openAdd">+ 新增员工</el-button>
       </div>
     </div>
@@ -165,6 +166,15 @@
         <div style="margin-top:10px;font-size:13px;color:#666">{{ verifyResult.suggestion }}</div>
       </div>
     </el-dialog>
+
+    <!-- 手机录入二维码弹窗 -->
+    <el-dialog title="📱 手机扫码录入" v-model="showQR" width="420px" align-center>
+      <div style="text-align:center">
+        <img :src="qrCodeUrl" style="width:240px;height:240px;border:1px solid #eee;border-radius:8px" alt="QR Code" />
+        <div style="font-size:13px;color:#888;margin-top:10px">用手机扫描二维码，即可打开录入表单</div>
+        <div style="font-size:12px;color:#378ADD;margin-top:6px;word-break:break-all">{{ mobileUrl }}</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -183,6 +193,9 @@ const currentPage=ref(1), pageSize=ref(10)
 const pagedList=computed(()=>{const s=(currentPage.value-1)*pageSize.value;return list.value.slice(s,s+pageSize.value)})
 const aiText=ref(''), aiLoading=ref(false), tableRef=ref(null)
 const showVerify=ref(false), verifyResult=ref(null), verifying=ref(false)
+const showQR=ref(false)
+const mobileUrl=computed(()=>`${window.location.origin}/#/personnel/mobile-add?user_id=${userId}`)
+const qrCodeUrl=computed(()=>`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(mobileUrl.value)}`)
 
 const stats = reactive({ total:0, active:0, expiringSoon:0, expired:0, hcNormal:0 })
 const hasFilter = computed(()=>!!(keyword.value||filterStatus.value!=='全部'||filterHealth.value!=='全部'||filterDept.value))
