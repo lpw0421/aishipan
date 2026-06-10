@@ -59,7 +59,7 @@
 
     <!-- 表格 -->
     <div class="table-wrap">
-      <el-table :data="list" v-loading="loading" row-key="id" @selection-change="onSelectionChange" ref="tableRef" :row-class-name="rowClass">
+      <el-table :data="pagedList" v-loading="loading" row-key="id" @selection-change="onSelectionChange" ref="tableRef" :row-class-name="rowClass">
         <el-table-column type="selection" width="36" />
         <el-table-column prop="employee_number" label="编号" width="72" />
         <el-table-column prop="name" label="姓名" width="80"><template #default="{row}"><span class="nc">{{ row.name }}</span></template></el-table-column>
@@ -80,6 +80,11 @@
         <el-button v-if="!hasFilter" type="primary" size="small" @click="openAdd">+ 新增员工</el-button>
         <el-button v-else link type="primary" @click="clearFilters">清除筛选</el-button>
       </el-empty>
+      <!-- 分页 -->
+      <div class="pager" v-if="list.length > 0">
+        <span class="pager-total">共 {{ list.length }} 条</span>
+        <el-pagination background small layout="total, sizes, prev, pager, next" :page-sizes="[10, 20, 50]" :page-size="pageSize" :total="list.length" v-model:current-page="currentPage" @size-change="s=>{pageSize=s;currentPage=1}" @current-change="page=>currentPage=page" />
+      </div>
     </div>
 
     <!-- 批量操作栏 -->
@@ -142,6 +147,8 @@ const user = JSON.parse(localStorage.getItem('user') || '{}'), userId = user.id
 const loading=ref(false), saving=ref(false), showForm=ref(false), editingId=ref(null)
 const keyword=ref(''), filterStatus=ref('全部'), filterHealth=ref('全部'), filterDept=ref(''), activeCard=ref('')
 const list=ref([]), depts=ref([]), positions=ref([]), selectedRows=ref([])
+const currentPage=ref(1), pageSize=ref(10)
+const pagedList=computed(()=>{const s=(currentPage.value-1)*pageSize.value;return list.value.slice(s,s+pageSize.value)})
 const aiText=ref(''), aiLoading=ref(false), tableRef=ref(null)
 
 const stats = reactive({ total:0, active:0, expiringSoon:0, expired:0, hcNormal:0 })
@@ -175,7 +182,7 @@ const fetchData=async()=>{loading.value=true;try{
   if(filterHealth.value!=='全部'){const m={正常:'正常',临期:'临期',过期:'过期'};r=r.filter(x=>x.hcStatus===m[filterHealth.value])}
   if(filterDept.value)r=r.filter(x=>x.department===filterDept.value)
   if(keyword.value){const kw=keyword.value.toLowerCase();r=r.filter(x=>(x.name||'').includes(kw)||(x.employee_number||'').includes(kw)||(x.position||'').includes(kw)||(x.phone||'').includes(kw)||(x.department||'').includes(kw))}
-  list.value=r}catch(e){console.error(e)}finally{loading.value=false}}
+  list.value=r;currentPage.value=1}catch(e){console.error(e)}finally{loading.value=false}}
 
 const toggleCard=c=>{activeCard.value=activeCard.value===c?'':c;if(c==='total'){filterStatus.value='全部';filterHealth.value='全部'}else if(c==='active')filterStatus.value='在职';else if(c==='expiring')filterHealth.value='临期';else if(c==='expired')filterHealth.value='过期';fetchData()}
 const openAdd=()=>{editingId.value=null;resetForm();showForm.value=true}
@@ -275,6 +282,10 @@ onMounted(fetchData)
 .file-icon{font-size:14px;line-height:1}
 .file-txt{font-weight:500}
 .file-none{color:#ccc;font-size:13px}
+
+/* 分页 */
+.pager{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:0.5px solid #f0f0f0}
+.pager-total{font-size:13px;color:#999}
 
 /* ===== 弹窗 ===== */
 .ai{margin-bottom:12px;padding:10px;background:#E6F1FB;border-radius:8px;border:1px solid #B5D4F4}
