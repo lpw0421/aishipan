@@ -1907,7 +1907,7 @@ app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
         if (hc) {
           db.prepare('UPDATE health_certs SET department=?, expiry_date=? WHERE id=?').run(dept, healthExpiry, hc.id)
         } else {
-          db.prepare('INSERT INTO health_certs (user_id, employee_name, department, expiry_date, file_path) VALUES (?,?,?,?,?)').run(userId, name, dept, healthExpiry, '')
+          db.prepare('INSERT INTO health_certs (user_id, employee_name, id_number, issue_date, department, expiry_date, file_path) VALUES (?,?,?,?,?,?,?)').run(userId, name, '', '', dept, healthExpiry, '')
         }
       }
     }
