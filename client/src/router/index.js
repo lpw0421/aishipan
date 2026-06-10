@@ -163,7 +163,7 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const user = localStorage.getItem('user')
 
-  const publicPages = ['/login', '/register']
+  const publicPages = ['/login', '/register', '/personnel/mobile-add']
 
   if (publicPages.includes(to.path)) {
     if (user && to.path !== '/register') {
