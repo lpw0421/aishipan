@@ -9,6 +9,9 @@
       <div class="top-right">
         <el-button class="btn-ghost" size="small" @click="fetchData">↻ 刷新</el-button>
         <el-button class="btn-ghost" size="small" @click="exportExcel">导出 Excel</el-button>
+        <el-upload :auto-upload="false" :show-file-list="false" accept=".xlsx,.xls" :on-change="importHealthCerts" style="display:inline-block">
+          <el-button class="btn-ghost" size="small">📥 导入健康证</el-button>
+        </el-upload>
         <el-button type="primary" size="small" class="btn-main" @click="openAdd">+ 新增员工</el-button>
       </div>
     </div>
@@ -181,6 +184,7 @@ const deleteRow=async r=>{await ElMessageBox.confirm(`确定删除 ${r.name} 的
 const onSelectionChange=rows=>{selectedRows.value=rows}
 const clearFilters=()=>{keyword.value='';filterStatus.value='全部';filterHealth.value='全部';filterDept.value='';activeCard.value='';fetchData()}
 const exportExcel=()=>{window.open('/api/personnel/export?user_id='+userId)}
+const importHealthCerts=(file)=>{const fd=new FormData();fd.append('file',file.raw);fd.append('user_id',userId);axios.post('/api/health-certs/import',fd).then(r=>{ElMessage.success(r.data.message);fetchData()}).catch(e=>{ElMessage.error(e.response?.data?.message||'导入失败')})}
 const batchExport=()=>{const ids=selectedRows.value.map(r=>r.id).join(',');window.open('/api/personnel/export?user_id='+userId+'&ids='+ids)}
 const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}

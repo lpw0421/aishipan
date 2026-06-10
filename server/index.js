@@ -1825,6 +1825,74 @@ app.get('/api/health-certs/export', (req, res) => {
   res.send(buf)
 })
 
+// 一键导入健康证（Excel）
+app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: '请上传 Excel 文件' })
+    const userId = getEffectiveUserId(req.body.user_id)
+    if (!userId) return res.status(400).json({ message: '缺少用户标识' })
+
+    // 读取 Excel
+    const wb = XLSX.readFile(req.file.path)
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+
+    if (rows.length === 0) return res.status(400).json({ message: 'Excel 文件为空' })
+
+    let imported = 0, updated = 0, skipped = 0
+    const errors = []
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const name = (row['员工姓名'] || row['姓名'] || row['name'] || '').toString().trim()
+      const expiry = (row['到期日期'] || row['expiry_date'] || '').toString().trim()
+      const dept = (row['部门'] || row['department'] || '').toString().trim()
+      const issueDate = (row['发证日期'] || row['issue_date'] || '').toString().trim()
+
+      if (!name || !expiry) {
+        errors.push(`第${i + 2}行: 姓名或到期日期为空，跳过`)
+        skipped++
+        continue
+      }
+
+      // 处理日期格式（Excel 可能是数字格式）
+      let expiryStr = expiry
+      if (typeof row['到期日期'] === 'number' || typeof row['expiry_date'] === 'number') {
+        const d = new Date((row['到期日期'] || row['expiry_date'] || 25569) * 86400000 + Date.UTC(1970, 0, 1) - 86400000 * 25569)
+        expiryStr = d.toISOString().slice(0, 10)
+      }
+
+      // 查找或创建 health_cert 记录
+      const existing = db.prepare('SELECT id FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
+
+      if (existing) {
+        db.prepare('UPDATE health_certs SET department = ?, expiry_date = ?, issue_date = ? WHERE id = ?')
+          .run(dept, expiryStr, issueDate, existing.id)
+        updated++
+      } else {
+        db.prepare('INSERT INTO health_certs (user_id, employee_name, department, issue_date, expiry_date, file_path) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(userId, name, dept, issueDate, expiryStr, '')
+        imported++
+      }
+
+      // 同步更新 personnel 表的健康证到期日
+      const person = db.prepare('SELECT id FROM personnel WHERE user_id = ? AND name = ?').get(userId, name)
+      if (person) {
+        db.prepare('UPDATE personnel SET health_cert_expiry = ? WHERE id = ?').run(expiryStr, person.id)
+      }
+    }
+
+    require('fs').unlinkSync(req.file.path) // 删除临时文件
+
+    res.json({
+      message: `导入完成：新增 ${imported} 人，更新 ${updated} 人，跳过 ${skipped} 行`,
+      imported, updated, skipped, errors: errors.slice(0, 20)
+    })
+  } catch (e) {
+    res.status(500).json({ message: '导入失败：' + e.message })
+  }
+})
+
 // ===== 通知接口 =====
 
 // 获取通知列表（最近50条）和未读数
@@ -5198,110 +5266,55 @@ app.post('/api/chat', async (req, res) => {
   if (!message) return res.status(400).json({ message: '请输入问题' })
 
   const aiKey = process.env.AI_API_KEY
-  if (!aiKey) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 AI_API_KEY。' })
-
   const userId = getEffectiveUserId(req.body.user_id)
 
-  // ---- 智能数据查询：如果用户提到员工姓名，自动拉取相关数据 ----
-  let dataContext = ''
-  if (userId) {
+  // ---- 员工数据查询：直接从DB匹配姓名 ----
+  if (userId && message) {
     try {
-      // 从 personnel 和 health_certs 两张表收集所有员工姓名
-      const persons = db.prepare('SELECT id, name, department, position, phone, entry_date, status, health_cert_expiry, remarks FROM personnel WHERE user_id = ?').all(userId)
-      const healthEmps = db.prepare('SELECT DISTINCT employee_name FROM health_certs WHERE user_id = ? AND employee_name != ""').all(userId)
-      const allNames = [...new Set([...persons.map(p => p.name), ...healthEmps.map(h => h.employee_name)])].filter(n => n && n.length >= 2)
+      const persons = db.prepare('SELECT name, department, position, phone, entry_date, status, health_cert_expiry FROM personnel WHERE user_id = ?').all(userId)
+      const hcRows = db.prepare('SELECT employee_name, expiry_date FROM health_certs WHERE user_id = ?').all(userId)
 
-      // 匹配：消息包含姓名 或 姓名包含消息关键词
-      const mentionedNames = allNames.filter(n => {
-        if (message.includes(n)) return true
-        // 提取消息中的2字以上中文词组，与姓名做模糊匹配
-        const words = message.match(/[一-龥]{2,4}/g) || []
-        return words.some(w => n.includes(w))
-      })
+      // 收集所有员工姓名
+      const allNames = [...new Set([...persons.map(p => p.name), ...hcRows.map(h => h.employee_name)])].filter(Boolean)
 
-      if (mentionedNames.length > 0) {
-        const contextParts = []
-        for (const name of mentionedNames) {
-          // 先查 personnel
-          const person = persons.find(p => p.name === name)
-          // 尝试模糊匹配
-          const personFuzzy = !person ? persons.find(p => name.includes(p.name) || p.name.includes(name)) : person
+      // 简单匹配：消息中是否直接包含姓名
+      const matched = allNames.filter(n => n.length >= 2 && message.includes(n))
 
-          // 健康证（优先从 personnel 取，其次 health_certs）
-          const hc = db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
-          const hcFuzzy = !hc ? db.prepare('SELECT expiry_date, file_path FROM health_certs WHERE user_id = ? AND employee_name LIKE ?').get(userId, `%${name}%`) : null
-          const hcData = hc || hcFuzzy
+      if (matched.length > 0) {
+        const results = []
+        for (const name of matched) {
+          const p = persons.find(x => x.name === name)
+          const hc = hcRows.find(x => x.employee_name === name)
+          const expiry = hc?.expiry_date || p?.health_cert_expiry || ''
 
-          // 健康证到期日优先取 health_certs（精确匹配），其次 personnel
-          let expiryDate = hcData?.expiry_date || ''
-          if (!expiryDate && personFuzzy?.health_cert_expiry) expiryDate = personFuzzy.health_cert_expiry
-          if (!expiryDate) expiryDate = person?.health_cert_expiry || ''
-
-          let hcStatus = '无记录'
-          if (expiryDate) {
-            const days = Math.ceil((new Date(expiryDate) - new Date()) / 86400000)
-            hcStatus = days < 0 ? `已过期${Math.abs(days)}天` : days <= 30 ? `${days}天后到期（临期）` : `有效（${days}天后到期）`
+          let statusText = '无记录'
+          if (expiry) {
+            const days = Math.ceil((new Date(expiry) - new Date()) / 86400000)
+            statusText = days < 0 ? `🔴 已过期${Math.abs(days)}天` : days <= 30 ? `🟠 ${days}天后到期（临期）` : `🟢 有效（${days}天后到期）`
           }
 
-          const dept = personFuzzy?.department || person?.department || '未填'
-          const pos = personFuzzy?.position || person?.position || '未填'
-          const phone = personFuzzy?.phone || person?.phone || ''
-          const entry = personFuzzy?.entry_date || person?.entry_date || ''
-          const status = personFuzzy?.status || person?.status || ''
-
-          // 培训记录
-          const trainings = db.prepare("SELECT course_name, training_date, exam_score FROM training_records WHERE user_id = ? AND employee_name LIKE ? ORDER BY training_date DESC LIMIT 10").all(userId, `%${name}%`)
-          const trainSummary = trainings.length > 0
-            ? trainings.map(t => `${t.training_date} ${t.course_name} ${t.exam_score ? `得分${t.exam_score}` : ''}`).join('；')
-            : '无培训记录'
-
-          contextParts.push(`【${name}】部门：${dept} | 职位：${pos} | 电话：${phone || '未填'} | 入职：${entry || '未填'} | 状态：${status || '未知'} | 健康证到期：${expiryDate || '无'}（${hcStatus}）| 培训：${trainSummary}`)
+          let reply = `📋 **${name}**\n`
+          if (p) reply += `• 部门：${p.department || '—'} | 职位：${p.position || '—'}\n`
+          reply += `• 健康证到期：${expiry || '无'}\n`
+          reply += `• 状态：${statusText}\n`
+          reply += `\n💡 详情请查看「人员综合管理」页面。`
+          results.push(reply)
         }
-        dataContext = '\n\n以下是从数据库查询到的实际数据，请基于这些数据回答用户问题，严禁编造：\n' + contextParts.join('\n')
+        return res.json({ reply: results.join('\n\n') })
       }
-    } catch (e) { /* 查询失败不影响对话 */ }
-  }
-
-  // 如果匹配到了员工数据，直接格式化返回，不经过AI（避免编造）
-  if (dataContext) {
-    const parts = dataContext.split('\n').filter(l => l.startsWith('【'))
-    const resultLines = []
-    for (const line of parts) {
-      const nameMatch = line.match(/【(.+?)】/)
-      const name = nameMatch ? nameMatch[1] : ''
-      const expiryMatch = line.match(/健康证到期：(.+?)（(.+?)）/)
-      const deptMatch = line.match(/部门：(.+?) \|/)
-      const trainMatch = line.match(/培训：(.+)$/)
-
-      let reply = `📋 **${name}**\n`
-      if (deptMatch) reply += `• 部门/职位：${deptMatch[1]}\n`
-      if (expiryMatch) reply += `• 健康证到期：${expiryMatch[1]}\n• 状态：${expiryMatch[2]}\n`
-      if (trainMatch && trainMatch[1] !== '无培训记录') reply += `• 培训记录：${trainMatch[1]}\n`
-      reply += `\n💡 详情请查看「人员综合管理」页面。`
-      resultLines.push(reply)
+    } catch (e) {
+      // 查询失败，继续走AI
     }
-    return res.json({ reply: resultLines.join('\n\n') })
   }
+
+  // ---- AI 对话（未匹配到员工时） ----
+  if (!aiKey) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 AI_API_KEY。' })
 
   const systemPrompt = `你是"AI食安"系统的智能助手，专门为食品生产企业的质量管理人员提供帮助。
 
-系统包含以下模块：
-- 原料库与验收标准：管理原料信息、配置验收标准（证件/感官/温度）
-- 资质管理：自有资质、供应商资质、产品报告跟踪和临期预警
-- 健康证管理：员工健康证到期提醒
-- 人员综合管理：员工信息、健康证状态统一管理
-- 培训考核：培训计划、课程、记录、考核
-- AI标签审核：上传标签图片自动审核合规性
-- 客诉管理：客诉看板、处理流程、满意度追踪
-- 体系文件：ISO 22000 / FSSC 22000 体系文件管理
-- 虫害管理：供应商、人员、化学品、服务记录
-- 计量校准：设备台账、校准计划、记录
+系统包含以下模块：原料库与验收标准、资质管理、健康证管理、人员综合管理、培训考核、AI标签审核、客诉管理、体系文件、虫害管理、计量校准。
 
-回答要求：
-1. 用中文回答，简洁专业
-2. 涉及食品安全问题时，引用相关GB标准
-3. 如果问题超出系统范围，建议联系食品安全顾问
-4. 回答控制在300字以内`
+回答要求：用中文回答，简洁专业，涉及食品安全问题时引用相关GB标准，控制在200字以内。`
 
   try {
     const messages = [
@@ -5309,18 +5322,12 @@ app.post('/api/chat', async (req, res) => {
       ...history.slice(-10),
       { role: 'user', content: message }
     ]
-
-    const response = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+    const resp = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        max_tokens: 600,
-        temperature: 0.7
-      })
+      body: JSON.stringify({ model: 'deepseek-chat', messages, max_tokens: 400, temperature: 0.7 })
     })
-    const data = await response.json()
+    const data = await resp.json()
     const reply = data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答，请稍后再试。'
     res.json({ reply })
   } catch (err) {
