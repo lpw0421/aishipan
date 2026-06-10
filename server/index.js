@@ -1979,28 +1979,12 @@ app.post('/api/health-certs/verify', upload.single('file'), async (req, res) => 
 
     if (certInfo.error) return res.json({ verified: false, ...certInfo })
 
-    // 与系统内数据进行比对
-    const name = certInfo.name || ''
-    const person = name ? db.prepare('SELECT id, name, department, position, health_cert_expiry FROM personnel WHERE user_id = ? AND name = ?').get(userId, name) : null
-    const hcRecord = name ? db.prepare('SELECT expiry_date, issue_date FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name) : null
-
-    const comparisons = []
-    if (person) {
-      comparisons.push({ field: '姓名', cert: name, system: person.name, match: true })
-      if (certInfo.expiry_date && person.health_cert_expiry) {
-        const match = certInfo.expiry_date === person.health_cert_expiry
-        comparisons.push({ field: '到期日期', cert: certInfo.expiry_date, system: person.health_cert_expiry, match })
-      }
-    } else {
-      comparisons.push({ field: '姓名', cert: name, system: '未找到该员工', match: false })
-    }
-
-    // 尝试外部查询（已知的城市验证接口）
+    // 尝试外部查询
     let externalCheck = { attempted: false, result: null }
     const certNumber = certInfo.cert_number || ''
     const authority = certInfo.issuing_authority || ''
 
-    // 各城市疾控中心验证 URL（示例，实际需确认可用性）
+    // 各城市疾控中心验证 URL
     const verifyUrls = []
     if (authority.includes('北京')) verifyUrls.push(`https://www.bjcdc.org/health-cert/verify?code=${encodeURIComponent(certNumber)}`)
     if (authority.includes('上海')) verifyUrls.push(`https://wsjkw.sh.gov.cn/health-cert/check?no=${encodeURIComponent(certNumber)}`)
@@ -2013,26 +1997,26 @@ app.post('/api/health-certs/verify', upload.single('file'), async (req, res) => 
         const checkRes = await fetch(verifyUrls[0], { signal: AbortSignal.timeout(8000) })
         externalCheck.result = checkRes.ok ? '接口可达（需人工确认结果）' : `接口返回 ${checkRes.status}`
       } catch {
-        externalCheck.result = '接口不可达（网络限制或接口不存在）'
+        externalCheck.result = '接口不可达'
       }
     }
 
-    // 综合判定
-    const hasMatch = comparisons.some(c => !c.match)
-    const verdict = comparisons.length === 0 ? '无法比对（系统内无此员工）'
-      : hasMatch ? '信息不一致，需人工核实'
-      : '信息一致，证书有效'
+    // 真伪判定
+    const issues = []
+    if (certInfo.confidence === '低') issues.push('图片模糊，建议重新上传')
+    if (!certInfo.has_seal) issues.push('缺少印章')
+    if (!certInfo.cert_number) issues.push('无证书编号')
+    if (!certInfo.issuing_authority) issues.push('无发证机构')
 
     res.json({
-      verified: !hasMatch && comparisons.length > 0,
-      verdict,
+      verified: issues.length === 0,
+      verdict: issues.length === 0 ? '证书格式正常' : `${issues.length} 个疑点`,
       certInfo,
-      comparisons,
+      issues,
       externalCheck,
-      suggestion: certInfo.confidence === '低' ? '图片质量较低，建议重新上传清晰图片'
-        : !certInfo.has_seal ? '缺少印章，可能为复印件或假证'
-        : hasMatch ? '证书信息与系统记录不一致，请核实'
-        : '证书信息与系统一致，可正常使用'
+      suggestion: issues.length === 0
+        ? 'AI 识别通过，建议通过官方渠道进一步核实'
+        : issues.join('；')
     })
   } catch (e) {
     res.status(500).json({ message: '验证失败：' + e.message })

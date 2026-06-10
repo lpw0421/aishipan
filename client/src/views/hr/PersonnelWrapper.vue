@@ -13,7 +13,7 @@
           <el-button class="btn-ghost" size="small">📥 导入员工</el-button>
         </el-upload>
         <el-button class="btn-ghost" size="small" @click="downloadTemplate">📋 下载模板</el-button>
-        <el-button class="btn-verify" size="small" @click="showVerify=true">🔍 真伪验证</el-button>
+        <el-button class="btn-verify" size="small" @click="showVerify=true" style="">🔍 真伪验证</el-button>
         <el-button type="primary" size="small" class="btn-main" @click="openAdd">+ 新增员工</el-button>
       </div>
     </div>
@@ -155,11 +155,8 @@
           <div class="vi-row"><span>发证机构</span><b>{{ verifyResult.certInfo.issuing_authority || '—' }}</b></div>
           <div class="vi-row"><span>AI 可信度</span><b>{{ verifyResult.certInfo.confidence || '—' }}</b></div>
         </div>
-        <div v-if="verifyResult.comparisons && verifyResult.comparisons.length" style="margin-top:10px">
-          <div style="font-size:13px;font-weight:500;margin-bottom:6px">系统比对：</div>
-          <div v-for="c in verifyResult.comparisons" class="vi-compare" :style="{color:c.match?'#3B6D11':'#A32D2D'}">
-            {{ c.field }}：证书 {{ c.cert }} → 系统 {{ c.system }} {{ c.match ? '✅' : '❌' }}
-          </div>
+        <div v-if="verifyResult.issues && verifyResult.issues.length" style="margin-top:10px">
+          <div v-for="(iss, i) in verifyResult.issues" :key="i" style="font-size:13px;color:#A32D2D">⚠️ {{ iss }}</div>
         </div>
         <div v-if="verifyResult.externalCheck && verifyResult.externalCheck.attempted" style="margin-top:10px;font-size:12px;color:#888">
           🌐 外部查询：{{ verifyResult.externalCheck.result }}
