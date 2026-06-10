@@ -1825,16 +1825,16 @@ app.get('/api/health-certs/export', (req, res) => {
   res.send(buf)
 })
 
-// 下载健康证导入模板
+// 下载员工导入模板（与列表列一致）
 app.get('/api/health-certs/template', (req, res) => {
   const ws = XLSX.utils.json_to_sheet([
-    { '员工姓名': '张三', '部门': '后厨部', '到期日期': '2027-06-30', '发证日期': '2026-06-01', '备注': '示例' }
+    { '姓名': '张三', '部门': '后厨部', '职位': '厨师', '电话': '13800001111', '入职日期': '2026-01-01', '状态': '在职', '健康证到期': '2027-06-30', '备注': '示例' }
   ])
-  ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 20 }]
+  ws['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 20 }]
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '健康证导入模板')
+  XLSX.utils.book_append_sheet(wb, ws, '员工导入模板')
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
-  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('健康证导入模板.xlsx'))
+  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('员工导入模板.xlsx'))
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   res.send(buf)
 })
@@ -1856,58 +1856,66 @@ app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
     // 校验列名：必须包含"员工姓名"和"到期日期"
     const headers = Object.keys(rows[0])
     const hasName = headers.some(h => h.includes('姓名') || h === 'name')
-    const hasExpiry = headers.some(h => h.includes('到期') && h.includes('日期') || h === 'expiry_date')
-    if (!hasName || !hasExpiry) {
-      return res.status(400).json({ message: 'Excel 格式不正确，必须包含"员工姓名"和"到期日期"列。请先下载模板。' })
+    if (!hasName) {
+      return res.status(400).json({ message: 'Excel 格式不正确，必须包含"姓名"列。请先下载模板。' })
     }
 
     let imported = 0, updated = 0, skipped = 0
-    // 统一列名：按模板标准
+    // 统一列名：按模板标准（姓名、部门、职位、电话、入职日期、状态、健康证到期、备注）
     const errors = []
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
-      // 兼容多种列名写法
-      const name = (row['员工姓名'] || row['姓名'] || row['name'] || '').toString().trim()
+      const name = (row['姓名'] || row['员工姓名'] || row['name'] || '').toString().trim()
       const dept = (row['部门'] || row['department'] || '').toString().trim()
-      const issueDate = (row['发证日期'] || row['issue_date'] || '').toString().trim()
-      let expiry = row['到期日期'] || row['expiry_date'] || ''
+      const position = (row['职位'] || row['position'] || '').toString().trim()
+      const phone = (row['电话'] || row['phone'] || '').toString().trim()
+      const status = (row['状态'] || row['status'] || '在职').toString().trim()
+      const remarks = (row['备注'] || row['remarks'] || '').toString().trim()
+
+      // 日期处理（兼容 Excel 序列号）
+      const toDateStr = (val) => {
+        if (!val) return ''
+        if (typeof val === 'number') return new Date((val - 25569) * 86400000).toISOString().slice(0, 10)
+        return String(val).trim()
+      }
+      const entryDate = toDateStr(row['入职日期'] || row['entry_date'])
+      const healthExpiry = toDateStr(row['健康证到期'] || row['到期日期'] || row['expiry_date'])
 
       if (!name) { errors.push(`第${i + 2}行: 姓名为空，跳过`); skipped++; continue }
-      if (!expiry) { errors.push(`${name}: 到期日期为空，跳过`); skipped++; continue }
 
-      // 处理日期格式（Excel 可能是序列号）
-      let expiryStr = expiry
-      if (typeof expiry === 'number') {
-        expiryStr = new Date((expiry - 25569) * 86400000).toISOString().slice(0, 10)
-      } else {
-        expiryStr = String(expiry).trim()
-      }
+      // 查找或创建 personnel 记录
+      const person = db.prepare('SELECT id, employee_number FROM personnel WHERE user_id = ? AND name = ?').get(userId, name)
 
-      // 查找或创建 health_cert 记录
-      const existing = db.prepare('SELECT id FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
-
-      if (existing) {
-        db.prepare('UPDATE health_certs SET department = ?, expiry_date = ?, issue_date = ? WHERE id = ?')
-          .run(dept, expiryStr, issueDate, existing.id)
+      if (person) {
+        // 更新现有员工
+        db.prepare('UPDATE personnel SET department=?, position=?, phone=?, entry_date=?, status=?, health_cert_expiry=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+          .run(dept, position, phone, entryDate, status, healthExpiry, remarks, person.id)
         updated++
       } else {
-        db.prepare('INSERT INTO health_certs (user_id, employee_name, department, issue_date, expiry_date, file_path) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(userId, name, dept, issueDate, expiryStr, '')
+        // 新增员工
+        const count = db.prepare('SELECT COUNT(*) AS cnt FROM personnel WHERE user_id = ?').get(userId).cnt
+        const empNo = 'RY-' + String(count + 1).padStart(3, '0')
+        db.prepare('INSERT INTO personnel (user_id, employee_number, name, department, position, phone, entry_date, status, health_cert_expiry, remarks) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(userId, empNo, name, dept, position, phone, entryDate, status, healthExpiry, remarks)
         imported++
       }
 
-      // 同步更新 personnel 表的健康证到期日
-      const person = db.prepare('SELECT id FROM personnel WHERE user_id = ? AND name = ?').get(userId, name)
-      if (person) {
-        db.prepare('UPDATE personnel SET health_cert_expiry = ? WHERE id = ?').run(expiryStr, person.id)
+      // 同步写入 health_certs 表
+      if (healthExpiry) {
+        const hc = db.prepare('SELECT id FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name)
+        if (hc) {
+          db.prepare('UPDATE health_certs SET department=?, expiry_date=? WHERE id=?').run(dept, healthExpiry, hc.id)
+        } else {
+          db.prepare('INSERT INTO health_certs (user_id, employee_name, department, expiry_date, file_path) VALUES (?,?,?,?,?)').run(userId, name, dept, healthExpiry, '')
+        }
       }
     }
 
     require('fs').unlinkSync(req.file.path) // 删除临时文件
 
     res.json({
-      message: `导入完成：新增 ${imported} 人，更新 ${updated} 人，跳过 ${skipped} 行`,
+      message: `导入完成：新增 ${imported} 人，更新 ${updated} 人${skipped > 0 ? `，跳过 ${skipped} 行` : ''}`,
       imported, updated, skipped, errors: errors.slice(0, 20)
     })
   } catch (e) {

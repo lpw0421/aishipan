@@ -10,7 +10,7 @@
         <el-button class="btn-ghost" size="small" @click="fetchData">↻ 刷新</el-button>
         <el-button class="btn-ghost" size="small" @click="exportExcel">导出 Excel</el-button>
         <el-upload :auto-upload="false" :show-file-list="false" accept=".xlsx,.xls" :on-change="importHealthCerts" style="display:inline-block">
-          <el-button class="btn-ghost" size="small">📥 导入健康证</el-button>
+          <el-button class="btn-ghost" size="small">📥 导入员工</el-button>
         </el-upload>
         <el-button class="btn-ghost" size="small" @click="downloadTemplate">📋 下载模板</el-button>
         <el-button type="primary" size="small" class="btn-main" @click="openAdd">+ 新增员工</el-button>
