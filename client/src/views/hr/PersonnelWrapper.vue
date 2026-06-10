@@ -13,6 +13,7 @@
           <el-button class="btn-ghost" size="small">📥 导入员工</el-button>
         </el-upload>
         <el-button class="btn-ghost" size="small" @click="downloadTemplate">📋 下载模板</el-button>
+        <el-button class="btn-verify" size="small" @click="showVerify=true">🔍 真伪验证</el-button>
         <el-button type="primary" size="small" class="btn-main" @click="openAdd">+ 新增员工</el-button>
       </div>
     </div>
@@ -133,6 +134,39 @@
       </el-form>
       <template #footer><el-button @click="showForm=false">取消</el-button><el-button type="primary" @click="save" :loading="saving">{{ editingId?'保存修改':'确认新增' }}</el-button></template>
     </el-dialog>
+
+    <!-- 真伪验证弹窗 -->
+    <el-dialog title="🔍 健康证真伪验证" v-model="showVerify" width="600px">
+      <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :on-change="doVerify" drag>
+        <div style="padding:30px 0">
+          <div style="font-size:40px;margin-bottom:10px">📸</div>
+          <div>点击或拖拽上传健康证图片</div>
+          <div style="font-size:12px;color:#999;margin-top:6px">支持 JPG/PNG，AI 自动识别并验证真伪</div>
+        </div>
+      </el-upload>
+      <div v-if="verifyResult" style="margin-top:16px">
+        <el-alert :type="verifyResult.verified?'success':'warning'" :title="verifyResult.verdict" :closable="false" style="margin-bottom:12px" />
+        <div v-if="verifyResult.certInfo && !verifyResult.certInfo.error" class="verify-info">
+          <div class="vi-row"><span>姓名</span><b>{{ verifyResult.certInfo.name || '—' }}</b></div>
+          <div class="vi-row"><span>身份证号</span><b>{{ verifyResult.certInfo.id_number || '—' }}</b></div>
+          <div class="vi-row"><span>健康证编号</span><b>{{ verifyResult.certInfo.cert_number || '—' }}</b></div>
+          <div class="vi-row"><span>发证日期</span><b>{{ verifyResult.certInfo.issue_date || '—' }}</b></div>
+          <div class="vi-row"><span>有效期至</span><b>{{ verifyResult.certInfo.expiry_date || '—' }}</b></div>
+          <div class="vi-row"><span>发证机构</span><b>{{ verifyResult.certInfo.issuing_authority || '—' }}</b></div>
+          <div class="vi-row"><span>AI 可信度</span><b>{{ verifyResult.certInfo.confidence || '—' }}</b></div>
+        </div>
+        <div v-if="verifyResult.comparisons && verifyResult.comparisons.length" style="margin-top:10px">
+          <div style="font-size:13px;font-weight:500;margin-bottom:6px">系统比对：</div>
+          <div v-for="c in verifyResult.comparisons" class="vi-compare" :style="{color:c.match?'#3B6D11':'#A32D2D'}">
+            {{ c.field }}：证书 {{ c.cert }} → 系统 {{ c.system }} {{ c.match ? '✅' : '❌' }}
+          </div>
+        </div>
+        <div v-if="verifyResult.externalCheck && verifyResult.externalCheck.attempted" style="margin-top:10px;font-size:12px;color:#888">
+          🌐 外部查询：{{ verifyResult.externalCheck.result }}
+        </div>
+        <div style="margin-top:10px;font-size:13px;color:#666">{{ verifyResult.suggestion }}</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -150,6 +184,7 @@ const list=ref([]), depts=ref([]), positions=ref([]), selectedRows=ref([])
 const currentPage=ref(1), pageSize=ref(10)
 const pagedList=computed(()=>{const s=(currentPage.value-1)*pageSize.value;return list.value.slice(s,s+pageSize.value)})
 const aiText=ref(''), aiLoading=ref(false), tableRef=ref(null)
+const showVerify=ref(false), verifyResult=ref(null), verifying=ref(false)
 
 const stats = reactive({ total:0, active:0, expiringSoon:0, expired:0, hcNormal:0 })
 const hasFilter = computed(()=>!!(keyword.value||filterStatus.value!=='全部'||filterHealth.value!=='全部'||filterDept.value))
@@ -194,6 +229,7 @@ const clearFilters=()=>{keyword.value='';filterStatus.value='全部';filterHealt
 const exportExcel=()=>{window.open('/api/personnel/export?user_id='+userId)}
 const importHealthCerts=(file)=>{const fd=new FormData();fd.append('file',file.raw);fd.append('user_id',userId);axios.post('/api/health-certs/import',fd).then(r=>{ElMessage.success(r.data.message);fetchData()}).catch(e=>{ElMessage.error(e.response?.data?.message||'导入失败')})}
 const downloadTemplate=()=>{window.open('/api/health-certs/template')}
+const doVerify=(file)=>{const fd=new FormData();fd.append('file',file.raw);fd.append('user_id',userId);verifying.value=true;verifyResult.value=null;axios.post('/api/health-certs/verify',fd).then(r=>{verifyResult.value=r.data}).catch(e=>{verifyResult.value={verified:false,verdict:'验证失败',suggestion:e.response?.data?.message||'网络错误'}}).finally(()=>{verifying.value=false})}
 const batchExport=()=>{const ids=selectedRows.value.map(r=>r.id).join(',');window.open('/api/personnel/export?user_id='+userId+'&ids='+ids)}
 const batchDelete=async()=>{await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 人？`,'批量删除',{type:'warning'});try{const ids=selectedRows.value.map(r=>r.id);await axios.post('/api/personnel/batch-delete',{user_id:userId,ids});ElMessage.success(`已删除 ${ids.length} 人`);tableRef.value?.clearSelection();fetchData()}catch{ElMessage.error('删除失败')}}
 const resetForm=()=>{Object.assign(form,{name:'',department:'',position:'',phone:'',entry_date:'',health_cert_expiry:'',status:'在职',remarks:'',hc_number:'',file_path:''});aiText.value=''}
@@ -286,6 +322,16 @@ onMounted(fetchData)
 /* 分页 */
 .pager{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:0.5px solid #f0f0f0}
 .pager-total{font-size:13px;color:#999}
+
+/* 真伪验证 */
+.btn-verify{background:#fff;border:1px solid #EF9F27;color:#BA7517;border-radius:6px}
+.btn-verify:hover{background:#FEF6E7}
+.verify-info{background:#f8f9fb;border-radius:8px;padding:12px 16px}
+.vi-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:0.5px solid #eee}
+.vi-row:last-child{border:none}
+.vi-row span{color:#999}
+.vi-row b{color:#333;font-weight:500}
+.vi-compare{font-size:13px;padding:2px 0}
 
 /* ===== 弹窗 ===== */
 .ai{margin-bottom:12px;padding:10px;background:#E6F1FB;border-radius:8px;border:1px solid #B5D4F4}

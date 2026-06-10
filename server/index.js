@@ -1923,6 +1923,122 @@ app.post('/api/health-certs/import', upload.single('file'), (req, res) => {
   }
 })
 
+// 健康证真伪验证（AI提取 + 内外部比对）
+app.post('/api/health-certs/verify', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: '请上传健康证图片' })
+    const userId = getEffectiveUserId(req.body.user_id)
+    if (!userId) return res.status(400).json({ message: '缺少用户标识' })
+
+    const aiKey = process.env.AI_API_KEY
+    if (!aiKey) return res.json({ verified: false, message: 'AI 服务未配置，无法进行图片识别' })
+
+    // 读图片转 base64
+    const fs = require('fs')
+    const imgBase64 = fs.readFileSync(req.file.path).toString('base64')
+    fs.unlinkSync(req.file.path)
+
+    // AI 提取健康证信息
+    const extractPrompt = `你是一个健康证信息提取工具。请从这张健康证图片中提取以下信息，以JSON格式返回（只返回JSON，不要其他文字）：
+{
+  "name": "姓名",
+  "id_number": "身份证号",
+  "cert_number": "健康证编号",
+  "issue_date": "发证日期(YYYY-MM-DD)",
+  "expiry_date": "有效期至(YYYY-MM-DD)",
+  "issuing_authority": "发证机构",
+  "job_category": "从业类别",
+  "has_seal": true/false,
+  "has_qr": true/false,
+  "confidence": "高/中/低"
+}
+如果某个字段无法识别，设为空字符串。`
+
+    const aiRes = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: extractPrompt },
+          { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imgBase64}` } }] }
+        ],
+        max_tokens: 500, temperature: 0.1
+      })
+    })
+    const aiData = await aiRes.json()
+    const rawJson = aiData.choices?.[0]?.message?.content || '{}'
+    // 清理可能包裹的 markdown 代码块
+    const jsonStr = rawJson.replace(/```json\n?|```/g, '').trim()
+    let certInfo
+    try {
+      certInfo = JSON.parse(jsonStr)
+    } catch {
+      certInfo = { error: 'AI 识别失败', raw: rawJson.slice(0, 200) }
+    }
+
+    if (certInfo.error) return res.json({ verified: false, ...certInfo })
+
+    // 与系统内数据进行比对
+    const name = certInfo.name || ''
+    const person = name ? db.prepare('SELECT id, name, department, position, health_cert_expiry FROM personnel WHERE user_id = ? AND name = ?').get(userId, name) : null
+    const hcRecord = name ? db.prepare('SELECT expiry_date, issue_date FROM health_certs WHERE user_id = ? AND employee_name = ?').get(userId, name) : null
+
+    const comparisons = []
+    if (person) {
+      comparisons.push({ field: '姓名', cert: name, system: person.name, match: true })
+      if (certInfo.expiry_date && person.health_cert_expiry) {
+        const match = certInfo.expiry_date === person.health_cert_expiry
+        comparisons.push({ field: '到期日期', cert: certInfo.expiry_date, system: person.health_cert_expiry, match })
+      }
+    } else {
+      comparisons.push({ field: '姓名', cert: name, system: '未找到该员工', match: false })
+    }
+
+    // 尝试外部查询（已知的城市验证接口）
+    let externalCheck = { attempted: false, result: null }
+    const certNumber = certInfo.cert_number || ''
+    const authority = certInfo.issuing_authority || ''
+
+    // 各城市疾控中心验证 URL（示例，实际需确认可用性）
+    const verifyUrls = []
+    if (authority.includes('北京')) verifyUrls.push(`https://www.bjcdc.org/health-cert/verify?code=${encodeURIComponent(certNumber)}`)
+    if (authority.includes('上海')) verifyUrls.push(`https://wsjkw.sh.gov.cn/health-cert/check?no=${encodeURIComponent(certNumber)}`)
+    if (authority.includes('广州') || authority.includes('广东')) verifyUrls.push(`https://wsjkw.gd.gov.cn/health-cert/query?certNo=${encodeURIComponent(certNumber)}`)
+    if (authority.includes('深圳')) verifyUrls.push(`https://wjw.sz.gov.cn/health-cert/search?code=${encodeURIComponent(certNumber)}`)
+
+    if (verifyUrls.length > 0 && certNumber) {
+      externalCheck.attempted = true
+      try {
+        const checkRes = await fetch(verifyUrls[0], { signal: AbortSignal.timeout(8000) })
+        externalCheck.result = checkRes.ok ? '接口可达（需人工确认结果）' : `接口返回 ${checkRes.status}`
+      } catch {
+        externalCheck.result = '接口不可达（网络限制或接口不存在）'
+      }
+    }
+
+    // 综合判定
+    const hasMatch = comparisons.some(c => !c.match)
+    const verdict = comparisons.length === 0 ? '无法比对（系统内无此员工）'
+      : hasMatch ? '信息不一致，需人工核实'
+      : '信息一致，证书有效'
+
+    res.json({
+      verified: !hasMatch && comparisons.length > 0,
+      verdict,
+      certInfo,
+      comparisons,
+      externalCheck,
+      suggestion: certInfo.confidence === '低' ? '图片质量较低，建议重新上传清晰图片'
+        : !certInfo.has_seal ? '缺少印章，可能为复印件或假证'
+        : hasMatch ? '证书信息与系统记录不一致，请核实'
+        : '证书信息与系统一致，可正常使用'
+    })
+  } catch (e) {
+    res.status(500).json({ message: '验证失败：' + e.message })
+  }
+})
+
 // ===== 通知接口 =====
 
 // 获取通知列表（最近50条）和未读数
