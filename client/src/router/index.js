@@ -142,8 +142,8 @@ const routes = [
       { path: 'training/certs', redirect: '/training' },
       {
         path: 'personnel',
-        redirect: '/personnel/info',
         children: [
+          { path: '', redirect: '/personnel/info' },
           { path: 'info', component: () => import('../views/hr/PersonnelWrapper.vue') },
           { path: 'mobile-add', component: () => import('../views/hr/MobileAdd.vue') },
           { path: 'list', redirect: '/personnel/info' },
