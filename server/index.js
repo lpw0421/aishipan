@@ -2505,7 +2505,7 @@ ${webInfo}
         { role: 'system', content: '你是食品供应商合规审核专家，精通GB 14881、HACCP、ISO 22000等标准。严格按JSON格式返回，不要添加额外说明。' },
         { role: 'user', content: prompt }
       ],
-      max_tokens: 2500, temperature: 0.3,
+      max_tokens: 800, temperature: 0.3,
       response_format: { type: 'json_object' }
     })
   })
@@ -2614,7 +2614,7 @@ async function callAI(systemPrompt, userContent, fallbackMsg) {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent }
         ],
-        max_tokens: 2000, temperature: 0.3,
+        max_tokens: 600, temperature: 0.3,
         response_format: { type: 'json_object' }
       })
     })
