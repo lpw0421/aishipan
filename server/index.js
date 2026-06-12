@@ -5414,13 +5414,13 @@ app.post('/api/chat', async (req, res) => {
   try {
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...history.slice(-10),
+      ...history.slice(-3),
       { role: 'user', content: message }
     ]
     const resp = await fetch((process.env.AI_BASE_URL || 'https://api.deepseek.com') + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
-      body: JSON.stringify({ model: 'deepseek-chat', messages, max_tokens: 400, temperature: 0.7 })
+      body: JSON.stringify({ model: 'deepseek-chat', messages, max_tokens: 200, temperature: 0.7 })
     })
     const data = await resp.json()
     const reply = data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答，请稍后再试。'
